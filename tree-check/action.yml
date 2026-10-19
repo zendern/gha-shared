@@ -1,0 +1,62 @@
+name: tree-check
+description: >-
+  Decide whether a merged PR needs re-testing. Outputs tested=true when the
+  merge commit's tree is identical to the PR head's tree and the gate check
+  passed on that head: identical trees mean the base branch now holds exactly
+  the content that was tested.
+
+inputs:
+  merge-sha:
+    description: The PR's merge commit (github.event.pull_request.merge_commit_sha).
+    required: true
+  head-sha:
+    description: The PR's head commit (github.event.pull_request.head.sha).
+    required: true
+  check-name:
+    description: >-
+      Check run that proves the head was tested. Use a gate job (for example
+      re-actors/alls-green), not a whole-run conclusion: a run whose jobs were
+      all skipped (drafts, title edits) still concludes success.
+    required: false
+    default: workflow-summary
+  token:
+    description: Token with contents:read and checks:read on the repository.
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  tested:
+    description: "'true' when the merged content was already tested, else 'false'."
+    value: ${{ steps.compare.outputs.tested }}
+
+runs:
+  using: composite
+  steps:
+    - name: Compare merged tree with the tested PR head
+      id: compare
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        REPO: ${{ github.repository }}
+        MERGE_SHA: ${{ inputs.merge-sha }}
+        HEAD_SHA: ${{ inputs.head-sha }}
+        CHECK_NAME: ${{ inputs.check-name }}
+      run: |
+        set -euo pipefail
+        tree() {
+          gh api "repos/$REPO/git/commits/$1" --jq '.tree.sha'
+        }
+        # Filtered to the Actions app so another integration's check with the
+        # same name can't count.
+        passed() {
+          gh api "repos/$REPO/commits/$HEAD_SHA/check-runs?check_name=$CHECK_NAME" \
+            --jq '[.check_runs[] | select(.app.slug == "github-actions" and .conclusion == "success")] | length'
+        }
+        merge_tree="$(tree "$MERGE_SHA")"
+        head_tree="$(tree "$HEAD_SHA")"
+        tested=false
+        if [ "$merge_tree" = "$head_tree" ] && [ "$(passed)" -gt 0 ]; then
+          tested=true
+        fi
+        echo "merge tree $merge_tree, head tree $head_tree, $CHECK_NAME passed on head: tested=$tested"
+        echo "tested=$tested" >> "$GITHUB_OUTPUT"
