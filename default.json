@@ -1,0 +1,8 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Batch updates into a weekly window. Every Renovate push re-runs CI on a GitHub Free minute budget, and updateNotScheduled defaults to true, which keeps updating existing PRs all week outside the schedule.",
+  "extends": [
+    "schedule:weekly"
+  ],
+  "updateNotScheduled": false
+}
