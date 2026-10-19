@@ -55,10 +55,23 @@ static path.
 
 The Renovate app must have access to this repository to read them.
 
-- `github>zendern/gha-shared`: weekly schedule, and no updates to existing PRs
-  outside it (`updateNotScheduled: false`).
-- `github>zendern/gha-shared:majors-approval`: major updates wait for approval
-  on the Dependency Dashboard.
+`github>zendern/gha-shared` (`default.json`) is the whole shared behaviour, so
+every repo updates the same way. A repo's `renovate.json` extends it and adds
+only its own custom managers, groups and host rules:
+
+- `config:recommended`, a 7-day `minimumReleaseAge` and
+  `internalChecksFilter: strict`.
+- A weekly schedule, with no updates to existing PRs outside it
+  (`updateNotScheduled: false`).
+- The `pre-commit` manager, so prek hook revs are bumped.
+- GHCR images allowed through the release-age check, since GHCR returns no
+  timestamps.
+- All GitHub Actions updates grouped into one PR.
+- Major updates held for approval on the Dependency Dashboard. A repo opts files
+  out with a later packageRule setting `dependencyDashboardApproval: false`.
+
+Repo rules come after the preset's, so a repo rule that sets the same option
+wins.
 
 ## Versioning
 

@@ -1,8 +1,41 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "description": "Batch updates into a weekly window. Every Renovate push re-runs CI on a GitHub Free minute budget, and updateNotScheduled defaults to true, which keeps updating existing PRs all week outside the schedule.",
+  "description": "Shared Renovate behaviour for zendern's private repos. Repo configs extend this and add only their own managers and groups.",
   "extends": [
+    "config:recommended",
     "schedule:weekly"
   ],
-  "updateNotScheduled": false
+  "updateNotScheduled": false,
+  "minimumReleaseAge": "7 days",
+  "internalChecksFilter": "strict",
+  "pre-commit": {
+    "description": "Opt-in manager: bumps the rev of every remote hook repo in .pre-commit-config.yaml (run by prek). Does nothing in repos without that file.",
+    "enabled": true
+  },
+  "packageRules": [
+    {
+      "description": "GHCR returns no release timestamps, so the 7-day minimumReleaseAge could never be met and GHCR images would silently never get PRs.",
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchPackageNames": [
+        "ghcr.io/**"
+      ],
+      "minimumReleaseAgeBehaviour": "timestamp-optional"
+    },
+    {
+      "description": "One PR for all GitHub Actions updates. Repo rules that set their own groupName win, since they come after this preset.",
+      "groupName": "github actions",
+      "matchManagers": [
+        "github-actions"
+      ]
+    },
+    {
+      "description": "Every Renovate push re-runs CI on a GitHub Free minute budget, so major updates only get a PR once ticked on the Dependency Dashboard. A repo can opt files out with a later rule setting dependencyDashboardApproval to false.",
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "dependencyDashboardApproval": true
+    }
+  ]
 }
