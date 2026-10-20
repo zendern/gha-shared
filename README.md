@@ -75,12 +75,16 @@ wins.
 
 ## Rulesets
 
-`rulesets/main.json` is the default-branch ruleset every repo in
+`rulesets/default-branch.json` is the `default-branch` ruleset every repo in
 `rulesets/repos.txt` should carry: PR required (no approvals), signed commits,
-linear history, no force-push or deletion. A repo marked `yes` in `repos.txt`
-also requires the `workflow-summary` check from the GitHub Actions app; mark it
-only once that repo's default branch runs a `workflow-summary` job, or every PR
-blocks on a check that never reports.
+linear history, no force-push or deletion, and a passing `workflow-summary`
+check from the GitHub Actions app. Every listed repo therefore needs an
+all-green gate job (e.g. `re-actors/alls-green`) named exactly
+`workflow-summary`. A PR that adds the gate reports the check on its own run;
+other PRs wait until it merges.
+
+`apply` renames a legacy ruleset called `main` to `default-branch` instead of
+creating a duplicate.
 
 - `rulesets/ruleset.sh check`: read-only; reports missing or drifted rulesets
   and exits 1 on drift.

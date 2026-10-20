@@ -1,7 +1,7 @@
 name: ruleset drift
 
 # Read-only check that every repo in rulesets/repos.txt carries the shared
-# "main" ruleset. Fails (and GitHub emails the owner) on a missing or drifted
+# "default-branch" ruleset. Fails (and GitHub emails the owner) on a missing or drifted
 # ruleset; fix it locally with `rulesets/ruleset.sh apply`, which needs your own
 # admin access, so no write credential is stored here.
 #
@@ -37,7 +37,7 @@ jobs:
         run: |
           {
             echo "list<<EOF"
-            grep -Ev '^[[:space:]]*(#|$)' rulesets/repos.txt | awk '{print $1}'
+            grep -Ev '^[[:space:]]*(#|$)' rulesets/repos.txt
             echo "EOF"
           } >>"$GITHUB_OUTPUT"
 

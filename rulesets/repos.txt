@@ -1,15 +1,14 @@
-# Repositories whose default branch must carry the shared "main" ruleset
-# (rulesets/main.json). One per line: <repo> <gate>
+# Repositories (owner zendern) whose default branch must carry the shared
+# ruleset in rulesets/default-branch.json, one per line.
 #
-# gate = yes adds a required `workflow-summary` status check (from the GitHub
-# Actions app). Only set it once that repo's default branch has a
-# workflow-summary job that actually runs: requiring a check that never reports
-# blocks every PR, including the one that adds it.
+# The ruleset requires a `workflow-summary` check from the GitHub Actions app,
+# so every repo listed needs an all-green gate job with that exact name. A PR
+# that adds the gate reports it on its own run; other PRs wait until it merges.
 #
-# Owner is zendern for every entry. Adding a repo here is deliberate; archived
-# repos and old forks stay out.
-chezmoi-dotfiles no
-home-automation no
-priskinator no
-tailscale-config no
-zender-aws no
+# Adding a repo here is deliberate; archived repos and old forks stay out. Add
+# it to the GitHub App installation too, or the drift check can't read it.
+chezmoi-dotfiles
+home-automation
+priskinator
+tailscale-config
+zender-aws
