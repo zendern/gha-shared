@@ -73,6 +73,26 @@ only its own custom managers, groups and host rules:
 Repo rules come after the preset's, so a repo rule that sets the same option
 wins.
 
+## Rulesets
+
+`rulesets/main.json` is the default-branch ruleset every repo in
+`rulesets/repos.txt` should carry: PR required (no approvals), signed commits,
+linear history, no force-push or deletion. A repo marked `yes` in `repos.txt`
+also requires the `workflow-summary` check from the GitHub Actions app; mark it
+only once that repo's default branch runs a `workflow-summary` job, or every PR
+blocks on a check that never reports.
+
+- `rulesets/ruleset.sh check`: read-only; reports missing or drifted rulesets
+  and exits 1 on drift.
+- `rulesets/ruleset.sh apply`: creates or updates them. Run it locally with your
+  own `gh` login; no write credential lives in CI.
+
+The `ruleset drift` workflow runs `check` weekly (and on demand) with a token
+from a private GitHub App installed on those repos with Repository >
+Administration: read. It needs the variable `RULESET_APP_CLIENT_ID` and the
+secret `RULESET_APP_PRIVATE_KEY`. The token is scoped to the repos in
+`repos.txt`, so a repo added there must also be added to the app installation.
+
 ## Versioning
 
 Callers pin a full commit SHA with the tag as a comment. Tag releases `vX.Y.Z`

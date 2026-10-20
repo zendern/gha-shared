@@ -1,0 +1,15 @@
+# Repositories whose default branch must carry the shared "main" ruleset
+# (rulesets/main.json). One per line: <repo> <gate>
+#
+# gate = yes adds a required `workflow-summary` status check (from the GitHub
+# Actions app). Only set it once that repo's default branch has a
+# workflow-summary job that actually runs: requiring a check that never reports
+# blocks every PR, including the one that adds it.
+#
+# Owner is zendern for every entry. Adding a repo here is deliberate; archived
+# repos and old forks stay out.
+chezmoi-dotfiles no
+home-automation no
+priskinator no
+tailscale-config no
+zender-aws no
