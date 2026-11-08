@@ -36,7 +36,7 @@ jobs:
           ref: ${{ inputs.ref }}
       - uses: $/checks
 
-  # Single gate: what merged.yml's tree-check (and the shared ruleset) reads.
+  # Single gate: what merged.yml's tree-check reads.
   workflow-summary:
     if: ${{ always() }}
     needs: [checks]

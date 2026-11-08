@@ -1,14 +1,10 @@
 # gha-shared
 
 [![ci](https://github.com/zendern/gha-shared/actions/workflows/ci.yml/badge.svg)](https://github.com/zendern/gha-shared/actions/workflows/ci.yml)
-[![ruleset drift](https://github.com/zendern/gha-shared/actions/workflows/ruleset-drift.yml/badge.svg?branch=main)](https://github.com/zendern/gha-shared/actions/workflows/ruleset-drift.yml)
 [![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-2088FF?logo=githubactions&logoColor=white)](https://docs.github.com/actions) [![prek](https://img.shields.io/badge/prek-enabled-DE611A?logo=precommit&logoColor=white)](https://github.com/j178/prek) [![Renovate](https://img.shields.io/badge/Renovate-enabled-1A1F6C?logo=renovate&logoColor=white)](https://docs.renovatebot.com)
 
 Composite GitHub Actions and a Renovate preset shared across zendern's
-repositories, plus the default-branch ruleset they all carry.
-The repository is private; **Settings > Actions > General > Access** is set to
-"Accessible from repositories owned by 'zendern' user" so the other repos can
-use its actions.
+repositories and maybe others if you like the setup.
 
 ## Contents
 
@@ -16,7 +12,6 @@ use its actions.
   - [`setup` and `checks`](#setup-and-checks): the start of every CI job
   - [`tree-check`](#tree-check): skip re-testing a merge that main already holds
 - [Renovate presets](#renovate-presets): `github>zendern/gha-shared`
-- [Rulesets](#rulesets)
 - [Versioning](#versioning)
 - [Development](#development)
 
@@ -88,7 +83,7 @@ workflow here calls, is still flagged until it is dogfooded and locked.
 `gh actions-lock` keeps the comment when it relocks, including after a tag
 bump. If a bump ever drops it, zizmor fails the PR, so it can't go unnoticed.
 
-The gate job (`workflow-summary`, see [Rulesets](#rulesets)) stays in each repo:
+The gate job (`workflow-summary`) stays in each repo:
 it lists the repo's own jobs in `needs:`, which an action can't do.
 
 ### `tree-check`
@@ -165,30 +160,6 @@ only its own custom managers, groups and host rules:
 
 Repo rules come after the preset's, so a repo rule that sets the same option
 wins.
-
-## Rulesets
-
-`rulesets/default-branch.json` is the `default-branch` ruleset every repo in
-`rulesets/repos.txt` should carry: PR required (no approvals), signed commits,
-linear history, no force-push or deletion, and a passing `workflow-summary`
-check from the GitHub Actions app. Every listed repo therefore needs an
-all-green gate job (e.g. `re-actors/alls-green`) named exactly
-`workflow-summary`. A PR that adds the gate reports the check on its own run;
-other PRs wait until it merges.
-
-`apply` renames a legacy ruleset called `main` to `default-branch` instead of
-creating a duplicate.
-
-- `rulesets/ruleset.sh check`: read-only; reports missing or drifted rulesets
-  and exits 1 on drift.
-- `rulesets/ruleset.sh apply`: creates or updates them. Run it locally with your
-  own `gh` login; no write credential lives in CI.
-
-The `ruleset drift` workflow runs `check` weekly (and on demand) with a token
-from a private GitHub App installed on those repos with Repository >
-Administration: read. It needs the variable `RULESET_APP_CLIENT_ID` and the
-secret `RULESET_APP_PRIVATE_KEY`. The token is scoped to the repos in
-`repos.txt`, so a repo added there must also be added to the app installation.
 
 ## Versioning
 
