@@ -91,10 +91,22 @@ tasks build into, keyed on the Go version, `go-version-file` and
 outside the repository root and jobs that build different tools.
 
 `checks` runs every prek hook at `PREK_VERSION`, then
-`gh actions-lock --verify`, which checks `.github/workflows/actions.lock`
-against GitHub. The verify step runs even when a hook fails, so one run
-reports both. A repo using `checks` must therefore have a lockfile: generate it
-with `gh actions-lock` after editing any `uses:` line.
+`prek run --hook-stage manual gh-actions-lock-verify --all-files`, which checks
+`.github/workflows/actions.lock` against GitHub. The verify step runs even when
+a hook fails, so one run reports both. A repo using `checks` therefore needs:
+
+- a lockfile: generate it with `gh actions-lock` after editing any `uses:` line;
+- both lockfile hooks from
+  [zendern/pre-commit-hooks](https://github.com/zendern/pre-commit-hooks#workflow-lockfile-gh-actions-lock)
+  in its shared hooks block. `gh-actions-lock-verify` is the one CI runs, and
+  the step fails if it isn't configured, so the check can't be skipped
+  silently:
+
+  ```yaml
+      hooks:
+        - id: gh-actions-lock-verify-local # offline, on every commit
+        - id: gh-actions-lock-verify       # manual stage, run by checks
+  ```
 
 Steps inside both actions use version tags. The caller's lockfile pins them as
 transitive dependencies; a caller without one runs them by tag.

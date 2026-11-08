@@ -2,7 +2,9 @@ name: checks
 description: >-
   Run every prek hook at the PREK_VERSION pinned in the repo's Taskfile.yml,
   then verify the workflow lockfile (.github/workflows/actions.lock) against
-  GitHub with gh-actions-lock. Run it after zendern/gha-shared/setup.
+  GitHub with the manual-stage gh-actions-lock-verify hook from
+  zendern/pre-commit-hooks, which the repo must configure. Run it after
+  zendern/gha-shared/setup.
 
 inputs:
   extra-args:
@@ -36,15 +38,13 @@ runs:
         prek-version: ${{ steps.prek.outputs.version }}
         extra-args: ${{ inputs.extra-args }}
 
-    # Runs even when a hook failed, so one run reports both. The release is
-    # immutable (its tag and assets can't change), so a tag pin is safe.
+    # Runs even when a hook failed, so one run reports both. The hook (and its
+    # gh-actions-lock version) comes from the repo's .pre-commit-config.yaml;
+    # naming its id fails the step when a repo hasn't configured it, so the
+    # check can't be skipped silently.
     - name: Verify the workflow lockfile
       if: ${{ !cancelled() }}
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.token }}
-        # renovate: datasource=github-releases depName=github/gh-actions-lock
-        GH_ACTIONS_LOCK_VERSION: v0.4.1
-      run: |
-        gh extension install github/gh-actions-lock --pin "$GH_ACTIONS_LOCK_VERSION"
-        gh actions-lock --verify
+      run: prek run --hook-stage manual gh-actions-lock-verify --all-files
