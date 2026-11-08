@@ -1,0 +1,86 @@
+name: merged
+
+# Runs when a PR merges into main. If the merge commit's tree is identical to
+# the PR head's and ci.yml's workflow-summary gate passed on that head, main
+# holds exactly what was checked and nothing re-runs; otherwise (main moved
+# under the PR) ci.yml re-runs its checks on the merge commit. A release follows
+# only once the merge is known checked, either way.
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  tree-check:
+    if: ${{ github.event.pull_request.merged }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      checks: read
+    outputs:
+      tested: ${{ steps.tree.outputs.tested }}
+    steps:
+      # This repo's own action, at this workflow's commit.
+      - id: tree
+        uses: $/tree-check
+        with:
+          merge-sha: ${{ github.event.pull_request.merge_commit_sha }}
+          head-sha: ${{ github.event.pull_request.head.sha }}
+
+  checks:
+    needs: [tree-check]
+    if: ${{ needs.tree-check.outputs.tested == 'false' }}
+    permissions:
+      contents: read
+    uses: $/.github/workflows/ci.yml
+    with:
+      ref: ${{ github.event.pull_request.merge_commit_sha }}
+
+  # Releases when the Conventional Commits since the last tag call for it: a fix
+  # is a patch, a feat a minor, a breaking change (`!` or BREAKING CHANGE) a
+  # major. Anything else releases nothing, unless it changed a shipped file
+  # (see next-version in Taskfile.yml). Notes come from the merged PR titles.
+  # Releases are immutable, so a published tag can't be moved.
+  release:
+    needs: [tree-check, checks]
+    # Only a merge known to be checked: tree-check passed and either found the
+    # PR's run covers main, or the re-run checks passed.
+    if: >-
+      ${{ !cancelled()
+      && needs.tree-check.result == 'success'
+      && (needs.tree-check.outputs.tested == 'true' || needs.checks.result == 'success') }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 5
+    permissions:
+      contents: write # create the release and its tag
+    # One at a time, so two quick merges cannot both claim the same version.
+    concurrency:
+      group: release
+      cancel-in-progress: false
+    steps:
+      - uses: $/setup
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          # svu reads every commit since the last tag.
+          fetch-depth: 0
+      # svu runs through `go run`. This repo has no go.mod to pick a version
+      # from; the go directive in svu's own module decides the toolchain.
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version: stable
+          # A release job must not restore a cache a PR run could have written.
+          cache: false
+      - name: Release if the commits since the last tag call for one
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          next="$(task --silent next-version)"
+          if [ -z "$next" ]; then
+            echo "No release: nothing since the last tag is a fix, feat, or breaking change."
+            exit 0
+          fi
+          gh release create "$next" --repo "$GITHUB_REPOSITORY" --target "$MERGE_SHA" --title "$next" --generate-notes

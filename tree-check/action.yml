@@ -46,17 +46,20 @@ runs:
         tree() {
           gh api "repos/$REPO/git/commits/$1" --jq '.tree.sha'
         }
-        # Filtered to the Actions app so another integration's check with the
-        # same name can't count.
-        passed() {
-          gh api "repos/$REPO/commits/$HEAD_SHA/check-runs?check_name=$CHECK_NAME" \
-            --jq '[.check_runs[] | select(.app.slug == "github-actions" and .conclusion == "success")] | length'
+        # The most recent gate check on the head decides, so a re-run that failed
+        # after an earlier success blocks. One still in progress has no
+        # conclusion, so it doesn't count either. Filtered to the Actions app
+        # so another integration's check with the same name can't count.
+        latest() {
+          gh api "repos/$REPO/commits/$HEAD_SHA/check-runs?check_name=$CHECK_NAME&filter=all" \
+            --jq '[.check_runs[] | select(.app.slug == "github-actions")] | sort_by(.started_at) | last | .conclusion // "none"'
         }
         merge_tree="$(tree "$MERGE_SHA")"
         head_tree="$(tree "$HEAD_SHA")"
+        conclusion="$(latest)"
         tested=false
-        if [ "$merge_tree" = "$head_tree" ] && [ "$(passed)" -gt 0 ]; then
+        if [ "$merge_tree" = "$head_tree" ] && [ "$conclusion" = "success" ]; then
           tested=true
         fi
-        echo "merge tree $merge_tree, head tree $head_tree, $CHECK_NAME passed on head: tested=$tested"
+        echo "merge tree $merge_tree, head tree $head_tree, latest $CHECK_NAME on head: $conclusion; tested=$tested"
         echo "tested=$tested" >> "$GITHUB_OUTPUT"

@@ -128,8 +128,9 @@ jobs:
 ```
 
 `tested` is `true` only when the merge commit's tree equals the PR head's tree
-**and** the gate check (`check-name`, default `workflow-summary`) succeeded on
-that head. Point `check-name` at an all-green gate job, not at a whole-run
+**and** the most recent gate check (`check-name`, default `workflow-summary`)
+on that head succeeded. An earlier success doesn't count once a later re-run
+failed, and a check still in progress doesn't count yet. Point `check-name` at an all-green gate job, not at a whole-run
 conclusion: a run whose jobs were all skipped (draft PRs, title edits) still
 concludes `success`.
 
@@ -195,7 +196,10 @@ Callers reference a release tag (`zendern/gha-shared/setup@v2.1.0`), and their
 workflow lockfile pins it to a commit. Renovate's github-actions manager bumps
 the tag and relocks.
 
-Merging to `main` releases automatically. CI's `release` job runs
+Merging to `main` releases automatically, once the merge is known checked: the
+`merged` workflow runs [`tree-check`](#tree-check) and re-runs `ci.yml`'s
+checks on the merge commit only when `main` moved under the PR. Its `release`
+job then runs
 [svu](https://github.com/caarlos0/svu) over the
 [Conventional Commits](https://www.conventionalcommits.org/) since the last
 tag: a `fix` is a patch, a `feat` a minor, a breaking change (`!` or
