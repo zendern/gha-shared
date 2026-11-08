@@ -1,0 +1,50 @@
+name: checks
+description: >-
+  Run every prek hook at the PREK_VERSION pinned in the repo's Taskfile.yml,
+  then verify the workflow lockfile (.github/workflows/actions.lock) against
+  GitHub with gh-actions-lock. Run it after zendern/gha-shared/setup.
+
+inputs:
+  extra-args:
+    description: Arguments to `prek run`, after `--show-diff-on-failure --color=always`.
+    required: false
+    default: --all-files
+  token:
+    description: >-
+      Token for zizmor's online audits (via prek) and for gh-actions-lock,
+      which resolves every locked ref against GitHub. Needs contents:read on
+      the repository; the default job token is enough for public actions.
+    required: false
+    default: ${{ github.token }}
+
+runs:
+  using: composite
+  steps:
+    - name: Read the prek version pinned in Taskfile.yml
+      id: prek
+      shell: bash
+      run: |
+        version="$(sed -n 's/^  PREK_VERSION: *"\{0,1\}\([^"]*\)"\{0,1\} *$/\1/p' Taskfile.yml)"
+        [ -n "$version" ] || { echo "::error file=Taskfile.yml::PREK_VERSION not found under vars:"; exit 1; }
+        echo "version=$version" >>"$GITHUB_OUTPUT"
+
+    - name: Run prek hooks
+      uses: j178/prek-action@v3.1.0
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+      with:
+        prek-version: ${{ steps.prek.outputs.version }}
+        extra-args: ${{ inputs.extra-args }}
+
+    # Runs even when a hook failed, so one run reports both. The release is
+    # immutable (its tag and assets can't change), so a tag pin is safe.
+    - name: Verify the workflow lockfile
+      if: ${{ !cancelled() }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        # renovate: datasource=github-releases depName=github/gh-actions-lock
+        GH_ACTIONS_LOCK_VERSION: v0.4.1
+      run: |
+        gh extension install github/gh-actions-lock --pin "$GH_ACTIONS_LOCK_VERSION"
+        gh actions-lock --verify
