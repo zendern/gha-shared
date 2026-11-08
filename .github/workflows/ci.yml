@@ -1,0 +1,28 @@
+name: ci
+
+on:
+  pull_request:
+
+permissions: {}
+
+# A new push to a PR cancels its stale run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  prek:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      # Runs every hook in .pre-commit-config.yaml over all files and caches the
+      # hook environments (prek installs the tools itself, so no lint-tool setup).
+      - name: Run prek hooks
+        uses: j178/prek-action@44924fe9ef4a6f88253c4b6b1bf11c689d3ce53d  # v3.1.0
+        with:
+          prek-version: "0.5.10"
