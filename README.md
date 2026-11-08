@@ -55,6 +55,55 @@ The whole merged workflow can't be shared as a reusable workflow, because the
 re-test has to call each repository's own CI workflow and `uses:` must be a
 static path.
 
+## `setup` and `checks` actions
+
+The common start of every CI job. Each repo pins its tool versions in a
+`Taskfile.yml` under `vars:`, and both actions read them from there, so CI runs
+the same versions as `task` does locally:
+
+```yaml
+vars:
+  # renovate: datasource=github-releases depName=go-task/task extractVersion=^v(?<version>.+)$
+  TASK_VERSION: 3.54.0
+  # renovate: datasource=github-releases depName=j178/prek extractVersion=^v(?<version>.+)$
+  PREK_VERSION: 0.5.10
+```
+
+```yaml
+jobs:
+  checks:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: zendern/gha-shared/setup@v2.1.0
+        with:
+          go-version-file: go.mod # omit in a repo without Go
+      - uses: zendern/gha-shared/checks@v2.1.0
+```
+
+`setup` checks out the repository (`persist-credentials: false`; inputs `ref`
+and `fetch-depth`) and installs Task at `TASK_VERSION`. With `go-version-file`
+it also sets up Go and restores the `./bin` cache that Task's `go install`
+tasks build into, keyed on the Go version, `go-version-file` and
+`Taskfile.yml`. `go-cache-dependency-path` and `tools-cache-key` cover a module
+outside the repository root and jobs that build different tools.
+
+`checks` runs every prek hook at `PREK_VERSION`, then
+`gh actions-lock --verify`, which checks `.github/workflows/actions.lock`
+against GitHub. The verify step runs even when a hook fails, so one run
+reports both. A repo using `checks` must therefore have a lockfile: generate it
+with `gh actions-lock` after editing any `uses:` line.
+
+Steps inside both actions use version tags. The caller's lockfile pins them as
+transitive dependencies; a caller without one runs them by tag.
+`.github/zizmor.yml` suppresses zizmor's `unpinned-uses` for `action.yml` files
+for that reason, since zizmor can't see a caller's lockfile.
+
+The gate job (`workflow-summary`, see [Rulesets](#rulesets)) stays in each repo:
+it lists the repo's own jobs in `needs:`, which an action can't do.
+
 ## Renovate presets
 
 The Renovate app must have access to this repository to read them.
@@ -68,6 +117,12 @@ only its own custom managers, groups and host rules:
 - A weekly schedule, with no updates to existing PRs outside it
   (`updateNotScheduled: false`).
 - The `pre-commit` manager, so prek hook revs are bumped.
+- A custom manager for `<NAME>_VERSION:` pins under a `# renovate:` comment, in
+  `Taskfile.yml` and in `action.yml` files. A repo that defines its own copy of
+  this manager should drop it, or each pin gets two PRs.
+- Nothing extra for workflow lockfiles: once `.github/workflows/actions.lock`
+  exists, the github-actions manager regenerates it on every action update
+  (experimental in Renovate).
 - GHCR images allowed through the release-age check, since GHCR returns no
   timestamps.
 - All GitHub Actions updates grouped into one PR.
@@ -103,14 +158,21 @@ secret `RULESET_APP_PRIVATE_KEY`. The token is scoped to the repos in
 
 ## Versioning
 
-Callers pin a full commit SHA with the tag as a comment. Tag releases `vX.Y.Z`
-so Renovate's github-actions manager can bump the pins.
+Callers reference a release tag (`zendern/gha-shared/setup@v2.1.0`), and their
+workflow lockfile pins it to a commit. Tag releases `vX.Y.Z` so Renovate's
+github-actions manager can bump the tags and relock.
 
 ## Development
 
-Linting runs through [prek](https://prek.j178.dev/) using `.pre-commit-config.yaml`.
+Linting runs through [prek](https://prek.j178.dev/) using
+`.pre-commit-config.yaml`, at the versions pinned in `Taskfile.yml`.
 
 ```sh
-prek install          # once per clone: installs the pre-commit and pre-push hooks
-prek run --all-files  # lint everything (this is also what CI runs)
+prek install  # once per clone: installs the pre-commit and pre-push hooks
+task check    # lint everything (CI runs the same hooks through ./checks)
+task lock     # regenerate .github/workflows/actions.lock after editing a `uses:`
 ```
+
+CI calls `$/setup` and `$/checks`, so each PR tests its own versions of the
+actions. `gh actions-lock` rewrites the pins inside actions reached through
+`$/` to tags, which is why they aren't SHAs.
