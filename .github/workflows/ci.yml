@@ -1,14 +1,21 @@
 name: ci
 
+# Runs on pull requests, and from merged.yml on a merge commit that main holds
+# untested. It doesn't run on push to main: merged.yml decides whether a merge
+# needs testing (every job bills a rounded-up minute).
 on:
   pull_request:
-  push:
-    branches: [main]
+  workflow_call:
+    inputs:
+      ref:
+        description: Commit to test (merged.yml passes the merge commit).
+        type: string
+        required: false
+        default: ""
 
 permissions: {}
 
-# A new push to a PR cancels its stale run. Pushes to main each get their own
-# group (by SHA), so one merge never cancels another's release.
+# A new push to a PR cancels its stale run.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
@@ -24,44 +31,19 @@ jobs:
       # versions are tested here before any repo picks them up. Other repos
       # call zendern/gha-shared/<action>@<tag>.
       - uses: $/setup
+        with:
+          # Empty on pull_request, which checks out the default ref.
+          ref: ${{ inputs.ref }}
       - uses: $/checks
 
-  # Releases from main when the Conventional Commits since the last tag call for
-  # it: a fix is a patch, a feat a minor, a breaking change (`!` or
-  # BREAKING CHANGE) a major. Anything else (docs, ci, chore, ...) releases
-  # nothing, unless it changed a shipped file (see next-version in
-  # Taskfile.yml). Notes are generated from the merged PR titles. Releases are
-  # immutable, so a published tag can't be moved.
-  release:
-    if: ${{ github.event_name == 'push' }}
+  # Single gate: what merged.yml's tree-check (and the shared ruleset) reads.
+  workflow-summary:
+    if: ${{ always() }}
     needs: [checks]
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 5
-    permissions:
-      contents: write # create the release and its tag
-    # One at a time, so two quick merges cannot both claim the same version.
-    concurrency:
-      group: release
-      cancel-in-progress: false
+    permissions: {}
     steps:
-      - uses: $/setup
+      - uses: re-actors/alls-green@v1.3.0
         with:
-          # svu reads every commit since the last tag.
-          fetch-depth: 0
-      # svu runs through `go run`. This repo has no go.mod to pick a version
-      # from; the go directive in svu's own module decides the toolchain.
-      - uses: actions/setup-go@v7.0.0
-        with:
-          go-version: stable
-          # A release job must not restore a cache a PR run could have written.
-          cache: false
-      - name: Release if the commits since the last tag call for one
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          next="$(task --silent next-version)"
-          if [ -z "$next" ]; then
-            echo "No release: nothing since the last tag is a fix, feat, or breaking change."
-            exit 0
-          fi
-          gh release create "$next" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "$next" --generate-notes
+          jobs: ${{ toJSON(needs) }}

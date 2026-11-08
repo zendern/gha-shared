@@ -195,7 +195,9 @@ Callers reference a release tag (`zendern/gha-shared/setup@v2.1.0`), and their
 workflow lockfile pins it to a commit. Renovate's github-actions manager bumps
 the tag and relocks.
 
-Merging to `main` releases automatically. CI's `release` job runs
+Merging to `main` releases automatically, once the merge is known tested: the
+`merged` workflow runs [`tree-check`](#tree-check) and re-tests the merge
+commit only when `main` moved under the PR. Its `release` job then runs
 [svu](https://github.com/caarlos0/svu) over the
 [Conventional Commits](https://www.conventionalcommits.org/) since the last
 tag: a `fix` is a patch, a `feat` a minor, a breaking change (`!` or
