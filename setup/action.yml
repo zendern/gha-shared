@@ -1,0 +1,79 @@
+name: setup
+description: >-
+  Check out the repository and install Task at the TASK_VERSION pinned in the
+  repo's Taskfile.yml. With go-version-file, also set up Go and restore the
+  ./bin tools cache that Task's go-install tasks build into.
+
+# Steps use version tags, not SHAs: gh actions-lock rewrites them to tags
+# (this repo's CI reaches them through `$/`), and each caller's lockfile pins
+# them as transitive dependencies. A caller without a lockfile runs them by tag.
+
+inputs:
+  ref:
+    description: Ref to check out. Empty checks out the event's default ref.
+    required: false
+    default: ""
+  fetch-depth:
+    description: Commits to fetch; 0 fetches all history.
+    required: false
+    default: "1"
+  go-version-file:
+    description: >-
+      go.mod (or go.work) whose go directive picks the Go version. Empty skips
+      Go setup and the tools cache.
+    required: false
+    default: ""
+  go-cache-dependency-path:
+    description: >-
+      go.sum path(s) keying setup-go's module cache, for a module not at the
+      repository root. Empty uses setup-go's default.
+    required: false
+    default: ""
+  tools-cache-key:
+    description: >-
+      Prefix of the ./bin cache key. Defaults to the job id, so jobs that build
+      different tools keep separate caches.
+    required: false
+    default: ""
+
+outputs:
+  go-version:
+    description: The Go version installed (empty without go-version-file).
+    value: ${{ steps.setup-go.outputs.go-version }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@v7.0.1 # zizmor: ignore[unpinned-uses] locked via ci.yml's lockfile
+      with:
+        ref: ${{ inputs.ref }}
+        fetch-depth: ${{ inputs.fetch-depth }}
+        persist-credentials: false
+
+    - name: Read the Task version pinned in Taskfile.yml
+      id: task
+      shell: bash
+      run: |
+        version="$(sed -n 's/^  TASK_VERSION: *"\{0,1\}\([^"]*\)"\{0,1\} *$/\1/p' Taskfile.yml)"
+        [ -n "$version" ] || { echo "::error file=Taskfile.yml::TASK_VERSION not found under vars:"; exit 1; }
+        echo "version=$version" >>"$GITHUB_OUTPUT"
+
+    - uses: go-task/setup-task@v2.2.0 # zizmor: ignore[unpinned-uses] locked via ci.yml's lockfile
+      with:
+        version: ${{ steps.task.outputs.version }}
+
+    - uses: actions/setup-go@v7.0.0 # zizmor: ignore[unpinned-uses] locked via ci.yml's lockfile
+      id: setup-go
+      if: ${{ inputs.go-version-file != '' }}
+      with:
+        go-version-file: ${{ inputs.go-version-file }}
+        cache-dependency-path: ${{ inputs.go-cache-dependency-path }}
+
+    # Tools built from source into ./bin (Taskfile.yml go-install tasks). A
+    # warm cache lets Task's status checks skip the build. A bumped pin in
+    # Taskfile.yml, the go directive, or the Go version changes the key.
+    - uses: actions/cache@v6.1.0 # zizmor: ignore[unpinned-uses] locked via ci.yml's lockfile
+      if: ${{ inputs.go-version-file != '' }}
+      with:
+        path: bin
+        key: tools-${{ inputs.tools-cache-key || github.job }}-${{ runner.os }}-${{ runner.arch }}-go${{ steps.setup-go.outputs.go-version }}-${{ hashFiles(inputs.go-version-file, 'Taskfile.yml') }}

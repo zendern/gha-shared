@@ -12,6 +12,19 @@
     "description": "Opt-in manager: bumps the rev of every remote hook repo in .pre-commit-config.yaml (run by prek). Does nothing in repos without that file.",
     "enabled": true
   },
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Tool versions pinned as `<NAME>_VERSION:` under a `# renovate:` comment: the vars in every repo's Taskfile.yml, and the env pins in this repo's composite actions. The github-actions manager keeps .github/workflows/actions.lock in step by itself once the file exists.",
+      "managerFilePatterns": [
+        "/^Taskfile\\.ya?ml$/",
+        "/(^|/)action\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: extractVersion=(?<extractVersion>\\S+))?\\n\\s+[A-Z_]+_VERSION: \"?(?<currentValue>[^\\s\"]+)\"?"
+      ]
+    }
+  ],
   "packageRules": [
     {
       "description": "GHCR returns no release timestamps, so the 7-day minimumReleaseAge could never be met and GHCR images would silently never get PRs.",

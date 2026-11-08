@@ -1,0 +1,27 @@
+# https://taskfile.dev
+version: "3"
+
+vars:
+  # Pinned tool versions, bumped by Renovate through the `# renovate:` comments
+  # (customManager in default.json). The setup and checks actions read
+  # TASK_VERSION and PREK_VERSION from here, so CI runs what you run locally.
+  # renovate: datasource=github-releases depName=go-task/task extractVersion=^v(?<version>.+)$
+  TASK_VERSION: 3.54.0
+  # renovate: datasource=github-releases depName=j178/prek extractVersion=^v(?<version>.+)$
+  PREK_VERSION: 0.5.10
+
+tasks:
+  default:
+    desc: Run every prek hook over all files (what CI runs).
+    cmds:
+      - task: check
+
+  check:
+    desc: Run every prek hook over all files.
+    cmds:
+      - prek run --all-files
+
+  lock:
+    desc: Regenerate .github/workflows/actions.lock after editing a `uses:` line.
+    cmds:
+      - gh actions-lock
