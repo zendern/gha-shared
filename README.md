@@ -128,8 +128,9 @@ jobs:
 ```
 
 `tested` is `true` only when the merge commit's tree equals the PR head's tree
-**and** the gate check (`check-name`, default `workflow-summary`) succeeded on
-that head. Point `check-name` at an all-green gate job, not at a whole-run
+**and** the most recent gate check (`check-name`, default `workflow-summary`)
+on that head succeeded. An earlier success doesn't count once a later re-run
+failed, and a check still in progress doesn't count yet. Point `check-name` at an all-green gate job, not at a whole-run
 conclusion: a run whose jobs were all skipped (draft PRs, title edits) still
 concludes `success`.
 
