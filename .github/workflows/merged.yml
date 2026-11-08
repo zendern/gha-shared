@@ -2,9 +2,9 @@ name: merged
 
 # Runs when a PR merges into main. If the merge commit's tree is identical to
 # the PR head's and ci.yml's workflow-summary gate passed on that head, main
-# holds exactly what was tested and the suite is skipped; otherwise (main moved
-# under the PR) the merge commit is re-tested through ci.yml. A release follows
-# only once the merge is known tested, either way.
+# holds exactly what was checked and nothing re-runs; otherwise (main moved
+# under the PR) ci.yml re-runs its checks on the merge commit. A release follows
+# only once the merge is known checked, either way.
 on:
   pull_request:
     types: [closed]
@@ -30,7 +30,7 @@ jobs:
           merge-sha: ${{ github.event.pull_request.merge_commit_sha }}
           head-sha: ${{ github.event.pull_request.head.sha }}
 
-  test:
+  checks:
     needs: [tree-check]
     if: ${{ needs.tree-check.outputs.tested == 'false' }}
     permissions:
@@ -45,13 +45,13 @@ jobs:
   # (see next-version in Taskfile.yml). Notes come from the merged PR titles.
   # Releases are immutable, so a published tag can't be moved.
   release:
-    needs: [tree-check, test]
-    # Only a merge known to be tested: tree-check passed and either found the
-    # PR's run covers main, or the re-test passed.
+    needs: [tree-check, checks]
+    # Only a merge known to be checked: tree-check passed and either found the
+    # PR's run covers main, or the re-run checks passed.
     if: >-
       ${{ !cancelled()
       && needs.tree-check.result == 'success'
-      && (needs.tree-check.outputs.tested == 'true' || needs.test.result == 'success') }}
+      && (needs.tree-check.outputs.tested == 'true' || needs.checks.result == 'success') }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 5
     permissions:
