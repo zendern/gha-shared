@@ -192,8 +192,18 @@ secret `RULESET_APP_PRIVATE_KEY`. The token is scoped to the repos in
 ## Versioning
 
 Callers reference a release tag (`zendern/gha-shared/setup@v2.1.0`), and their
-workflow lockfile pins it to a commit. Tag releases `vX.Y.Z` so Renovate's
-github-actions manager can bump the tags and relock.
+workflow lockfile pins it to a commit. Renovate's github-actions manager bumps
+the tag and relocks.
+
+Merging to `main` releases automatically. CI's `release` job runs
+[svu](https://github.com/caarlos0/svu) over the
+[Conventional Commits](https://www.conventionalcommits.org/) since the last
+tag: a `fix` is a patch, a `feat` a minor, a breaking change (`!` or
+`BREAKING CHANGE`) a major. Other types release nothing, unless they change a
+shipped file (`setup`, `checks`, `tree-check`, `default.json`), which is at
+least a patch. `task next-version` prints what merging the current branch would
+release. Releases are immutable: a published tag can't be moved or deleted, so
+a bad release is fixed by the next one.
 
 ## Development
 

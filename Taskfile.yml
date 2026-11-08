@@ -9,6 +9,10 @@ vars:
   TASK_VERSION: 3.54.0
   # renovate: datasource=github-releases depName=j178/prek extractVersion=^v(?<version>.+)$
   PREK_VERSION: 0.5.10
+  # svu picks the next release version from the Conventional Commits since the
+  # last tag (next-version below).
+  # renovate: datasource=go depName=github.com/caarlos0/svu/v3
+  SVU_VERSION: v3.4.4
 
 tasks:
   default:
@@ -25,3 +29,21 @@ tasks:
     desc: Regenerate .github/workflows/actions.lock after editing a `uses:` line.
     cmds:
       - gh actions-lock
+
+  next-version:
+    desc: Print the version merging this branch would release, or nothing if it would not release
+    vars:
+      SVU: go run github.com/caarlos0/svu/v3@{{.SVU_VERSION}}
+      # What a calling repo runs: the actions and the Renovate preset.
+      SHIPPED: setup checks tree-check default.json
+    cmds:
+      # svu next prints the current version when no commit calls for a bump. A
+      # refactor, perf or build change to the shipped files still changes what
+      # every calling repo runs, so it is at least a patch.
+      - |
+        current="$({{.SVU}} current)"
+        next="$({{.SVU}} next)"
+        if [ "$next" = "$current" ] && ! git diff --quiet "$current" HEAD -- {{.SHIPPED}}; then
+          next="$({{.SVU}} patch)"
+        fi
+        if [ "$next" != "$current" ]; then echo "$next"; fi
