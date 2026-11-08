@@ -4,58 +4,29 @@
 [![ruleset drift](https://github.com/zendern/gha-shared/actions/workflows/ruleset-drift.yml/badge.svg?branch=main)](https://github.com/zendern/gha-shared/actions/workflows/ruleset-drift.yml)
 [![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-2088FF?logo=githubactions&logoColor=white)](https://docs.github.com/actions) [![prek](https://img.shields.io/badge/prek-enabled-DE611A?logo=precommit&logoColor=white)](https://github.com/j178/prek) [![Renovate](https://img.shields.io/badge/Renovate-enabled-1A1F6C?logo=renovate&logoColor=white)](https://docs.renovatebot.com)
 
-GitHub Actions and Renovate presets shared across zendern's repositories.
+Composite GitHub Actions and a Renovate preset shared across zendern's
+repositories, plus the default-branch ruleset they all carry.
 The repository is private; **Settings > Actions > General > Access** is set to
 "Accessible from repositories owned by 'zendern' user" so the other repos can
 use its actions.
 
-## `tree-check` action
+## Contents
 
-Decides whether a merged PR needs re-testing on the base branch. CI runs on
-pull requests only, and a workflow on `pull_request: closed` uses this to skip
-the re-run when main already holds exactly the tested content:
+- [GitHub Actions](#github-actions)
+  - [`setup` and `checks`](#setup-and-checks): the start of every CI job
+  - [`tree-check`](#tree-check): skip re-testing a merge that main already holds
+- [Renovate presets](#renovate-presets): `github>zendern/gha-shared`
+- [Rulesets](#rulesets)
+- [Versioning](#versioning)
+- [Development](#development)
 
-```yaml
-on:
-  pull_request:
-    types: [closed]
-    branches: [main]
+## GitHub Actions
 
-jobs:
-  tree-check:
-    if: ${{ github.event.pull_request.merged }}
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-      checks: read
-    outputs:
-      tested: ${{ steps.tree.outputs.tested }}
-    steps:
-      - id: tree
-        uses: zendern/gha-shared/tree-check@<sha> # v1.0.0
-        with:
-          merge-sha: ${{ github.event.pull_request.merge_commit_sha }}
-          head-sha: ${{ github.event.pull_request.head.sha }}
+Composite actions, called as `zendern/gha-shared/<action>@<tag>`. Each caller's
+workflow lockfile pins the tag and every action inside it to a commit (see
+[Versioning](#versioning)).
 
-  test:
-    needs: tree-check
-    if: ${{ needs.tree-check.outputs.tested == 'false' }}
-    uses: ./.github/workflows/ci.yml
-    with:
-      ref: ${{ github.event.pull_request.merge_commit_sha }}
-```
-
-`tested` is `true` only when the merge commit's tree equals the PR head's tree
-**and** the gate check (`check-name`, default `workflow-summary`) succeeded on
-that head. Point `check-name` at an all-green gate job, not at a whole-run
-conclusion: a run whose jobs were all skipped (draft PRs, title edits) still
-concludes `success`.
-
-The whole merged workflow can't be shared as a reusable workflow, because the
-re-test has to call each repository's own CI workflow and `uses:` must be a
-static path.
-
-## `setup` and `checks` actions
+### `setup` and `checks`
 
 The common start of every CI job. Each repo pins its tool versions in a
 `Taskfile.yml` under `vars:`, and both actions read them from there, so CI runs
@@ -119,6 +90,52 @@ bump. If a bump ever drops it, zizmor fails the PR, so it can't go unnoticed.
 
 The gate job (`workflow-summary`, see [Rulesets](#rulesets)) stays in each repo:
 it lists the repo's own jobs in `needs:`, which an action can't do.
+
+### `tree-check`
+
+Decides whether a merged PR needs re-testing on the base branch. CI runs on
+pull requests only, and a workflow on `pull_request: closed` uses this to skip
+the re-run when main already holds exactly the tested content:
+
+```yaml
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+jobs:
+  tree-check:
+    if: ${{ github.event.pull_request.merged }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      checks: read
+    outputs:
+      tested: ${{ steps.tree.outputs.tested }}
+    steps:
+      - id: tree
+        uses: zendern/gha-shared/tree-check@<sha> # v1.0.0
+        with:
+          merge-sha: ${{ github.event.pull_request.merge_commit_sha }}
+          head-sha: ${{ github.event.pull_request.head.sha }}
+
+  test:
+    needs: tree-check
+    if: ${{ needs.tree-check.outputs.tested == 'false' }}
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ github.event.pull_request.merge_commit_sha }}
+```
+
+`tested` is `true` only when the merge commit's tree equals the PR head's tree
+**and** the gate check (`check-name`, default `workflow-summary`) succeeded on
+that head. Point `check-name` at an all-green gate job, not at a whole-run
+conclusion: a run whose jobs were all skipped (draft PRs, title edits) still
+concludes `success`.
+
+The whole merged workflow can't be shared as a reusable workflow, because the
+re-test has to call each repository's own CI workflow and `uses:` must be a
+static path.
 
 ## Renovate presets
 
