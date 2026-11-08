@@ -87,7 +87,7 @@ repos:
 
   # Shared hooks, same block in every repo (https://github.com/zendern/pre-commit-hooks).
   - repo: https://github.com/zendern/pre-commit-hooks
-    rev: d1ffd220a8beb82cac9eb7a36a546be89c40e5ec  # frozen: v1.2.0
+    rev: cb3feef6aa5b1864d521e8bc84acc35391146974  # frozen: v1.3.0
     hooks:
       - id: no-latest-runners
         priority: checks
@@ -96,3 +96,8 @@ repos:
       - id: require-runner-arch
         priority: checks
         args: [--arch=arm64]
+      # Offline lockfile coverage on every commit; the provenance check is
+      # manual-stage, run in CI by the checks action.
+      - id: gh-actions-lock-verify-local
+        priority: checks
+      - id: gh-actions-lock-verify
