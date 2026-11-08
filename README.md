@@ -109,9 +109,13 @@ a hook fails, so one run reports both. A repo using `checks` therefore needs:
   ```
 
 Steps inside both actions use version tags. The caller's lockfile pins them as
-transitive dependencies; a caller without one runs them by tag.
-`.github/zizmor.yml` suppresses zizmor's `unpinned-uses` for `action.yml` files
-for that reason, since zizmor can't see a caller's lockfile.
+transitive dependencies; a caller without one runs them by tag. zizmor can't
+see a lockfile, so each of those `uses:` lines carries
+`# zizmor: ignore[unpinned-uses]`. That covers only steps this repo's own CI
+reaches through `$/`, which `ci.yml`'s lockfile pins. A new action, or one no
+workflow here calls, is still flagged until it is dogfooded and locked.
+`gh actions-lock` keeps the comment when it relocks, including after a tag
+bump. If a bump ever drops it, zizmor fails the PR, so it can't go unnoticed.
 
 The gate job (`workflow-summary`, see [Rulesets](#rulesets)) stays in each repo:
 it lists the repo's own jobs in `needs:`, which an action can't do.

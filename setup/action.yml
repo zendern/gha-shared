@@ -44,7 +44,7 @@ outputs:
 runs:
   using: composite
   steps:
-    - uses: actions/checkout@v7.0.1
+    - uses: actions/checkout@v7.0.1 # zizmor: ignore[unpinned-uses] locked via ci.yml's lockfile
       with:
         ref: ${{ inputs.ref }}
         fetch-depth: ${{ inputs.fetch-depth }}
@@ -58,11 +58,11 @@ runs:
         [ -n "$version" ] || { echo "::error file=Taskfile.yml::TASK_VERSION not found under vars:"; exit 1; }
         echo "version=$version" >>"$GITHUB_OUTPUT"
 
-    - uses: go-task/setup-task@v2.2.0
+    - uses: go-task/setup-task@v2.2.0 # zizmor: ignore[unpinned-uses] locked via ci.yml's lockfile
       with:
         version: ${{ steps.task.outputs.version }}
 
-    - uses: actions/setup-go@v7.0.0
+    - uses: actions/setup-go@v7.0.0 # zizmor: ignore[unpinned-uses] locked via ci.yml's lockfile
       id: setup-go
       if: ${{ inputs.go-version-file != '' }}
       with:
@@ -72,7 +72,7 @@ runs:
     # Tools built from source into ./bin (Taskfile.yml go-install tasks). A
     # warm cache lets Task's status checks skip the build. A bumped pin in
     # Taskfile.yml, the go directive, or the Go version changes the key.
-    - uses: actions/cache@v6.1.0
+    - uses: actions/cache@v6.1.0 # zizmor: ignore[unpinned-uses] locked via ci.yml's lockfile
       if: ${{ inputs.go-version-file != '' }}
       with:
         path: bin

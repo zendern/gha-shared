@@ -1,8 +1,0 @@
-# zizmor can't lock composite action definitions yet, so it wants SHA pins in
-# them. Here the pins are tags on purpose: callers' lockfiles pin them as
-# transitive dependencies (see setup/action.yml). Workflows are still checked;
-# .github/workflows/actions.lock covers them.
-rules:
-  unpinned-uses:
-    ignore:
-      - action.yml

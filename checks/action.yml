@@ -31,7 +31,7 @@ runs:
         echo "version=$version" >>"$GITHUB_OUTPUT"
 
     - name: Run prek hooks
-      uses: j178/prek-action@v3.1.0
+      uses: j178/prek-action@v3.1.0 # zizmor: ignore[unpinned-uses] locked via ci.yml's lockfile
       env:
         GH_TOKEN: ${{ inputs.token }}
       with:
