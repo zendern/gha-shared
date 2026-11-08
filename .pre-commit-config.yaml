@@ -1,0 +1,98 @@
+# prek hook config — https://prek.j178.dev/configuration/
+#
+#   prek install          # once per clone: installs the pre-commit + pre-push shims
+#   prek run --all-files  # what CI runs
+#
+# Every `rev:` is frozen to a commit SHA (`# frozen:` names the tag), so a moved
+# tag cannot change what runs; Renovate bumps SHA and comment together through
+# its pre-commit manager.
+#
+# Scheduling: hooks that share a `priority` run concurrently; a higher priority
+# waits for every lower one to finish. The builtin fixers rewrite the same
+# files, so each gets its own tier, first, and every check after them sees the
+# fixed files.
+
+minimum_prek_version: "0.4.13"
+default_install_hook_types: [pre-commit, pre-push]
+default_stages: [pre-commit]
+
+priorities:
+  fix-bom: 0
+  fix-line-endings: 1
+  fix-whitespace: 2
+  fix-eof: 3
+  checks: 10
+
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: 83d9cd684c87d95d656c1458ef04895a7f1cbd8e  # frozen: v8.30.1
+    hooks:
+      - id: gitleaks
+        priority: checks
+
+  - repo: https://github.com/zizmorcore/zizmor-pre-commit
+    rev: c92afdf2c6ca336aaa8f39e2bd8d48f62dbd8e1f  # frozen: v1.31.1
+    hooks:
+      - id: zizmor
+        priority: checks
+
+  - repo: https://github.com/adrienverge/yamllint
+    rev: cba56bcde1fdd01c1deb3f945e69764c291a6530  # frozen: v1.38.0
+    hooks:
+      - id: yamllint
+        priority: checks
+
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: a6564f5d57444e123433a5c9af733e3975c77229  # frozen: v0.11.0.1-1
+    hooks:
+      - id: shellcheck
+        args: [-x, --severity=style]
+        priority: checks
+
+  # ------------------------------------------------- prek builtins (no rev)
+  # Their manifests also list pre-push, which beats default_stages, so each sets
+  # `stages: [pre-commit]`; only the branch guard runs on push. A fixer that
+  # rewrites a file fails the commit: re-stage and commit again.
+  - repo: builtin
+    hooks:
+      - id: fix-byte-order-marker
+        stages: [pre-commit]
+        priority: fix-bom
+      - id: mixed-line-ending
+        stages: [pre-commit]
+        priority: fix-line-endings
+      - id: trailing-whitespace
+        stages: [pre-commit]
+        args: [--markdown-linebreak-ext=md]
+        priority: fix-whitespace
+      - id: end-of-file-fixer
+        stages: [pre-commit]
+        priority: fix-eof
+      - id: check-merge-conflict
+        stages: [pre-commit]
+        priority: checks
+      - id: check-case-conflict
+        stages: [pre-commit]
+        priority: checks
+      - id: check-added-large-files
+        stages: [pre-commit]
+        priority: checks
+      - id: detect-private-key
+        stages: [pre-commit]
+        priority: checks
+      # Block direct pushes to main; changes land through a pull request.
+      - id: no-commit-to-branch
+        args: [--branch, main]
+        stages: [pre-push]
+
+  # Shared hooks, same block in every repo (https://github.com/zendern/pre-commit-hooks).
+  - repo: https://github.com/zendern/pre-commit-hooks
+    rev: d1ffd220a8beb82cac9eb7a36a546be89c40e5ec  # frozen: v1.2.0
+    hooks:
+      - id: no-latest-runners
+        priority: checks
+      - id: require-timeouts
+        priority: checks
+      - id: require-runner-arch
+        priority: checks
+        args: [--arch=arm64]

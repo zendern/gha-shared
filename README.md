@@ -1,7 +1,8 @@
 # gha-shared
 
+[![ci](https://github.com/zendern/gha-shared/actions/workflows/ci.yml/badge.svg)](https://github.com/zendern/gha-shared/actions/workflows/ci.yml)
 [![ruleset drift](https://github.com/zendern/gha-shared/actions/workflows/ruleset-drift.yml/badge.svg?branch=main)](https://github.com/zendern/gha-shared/actions/workflows/ruleset-drift.yml)
-[![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-2088FF?logo=githubactions&logoColor=white)](https://docs.github.com/actions) [![Renovate](https://img.shields.io/badge/Renovate-enabled-1A1F6C?logo=renovate&logoColor=white)](https://docs.renovatebot.com)
+[![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-2088FF?logo=githubactions&logoColor=white)](https://docs.github.com/actions) [![prek](https://img.shields.io/badge/prek-enabled-DE611A?logo=precommit&logoColor=white)](https://github.com/j178/prek) [![Renovate](https://img.shields.io/badge/Renovate-enabled-1A1F6C?logo=renovate&logoColor=white)](https://docs.renovatebot.com)
 
 GitHub Actions and Renovate presets shared across zendern's repositories.
 The repository is private; **Settings > Actions > General > Access** is set to
@@ -104,3 +105,12 @@ secret `RULESET_APP_PRIVATE_KEY`. The token is scoped to the repos in
 
 Callers pin a full commit SHA with the tag as a comment. Tag releases `vX.Y.Z`
 so Renovate's github-actions manager can bump the pins.
+
+## Development
+
+Linting runs through [prek](https://prek.j178.dev/) using `.pre-commit-config.yaml`.
+
+```sh
+prek install          # once per clone: installs the pre-commit and pre-push hooks
+prek run --all-files  # lint everything (this is also what CI runs)
+```
