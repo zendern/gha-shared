@@ -4,7 +4,8 @@ description: >-
   then verify the workflow lockfile (.github/workflows/actions.lock) against
   GitHub with the manual-stage gh-actions-lock-verify hook from
   zendern/pre-commit-hooks, which the repo must configure. Run it after
-  zendern/gha-shared/setup.
+  zendern/gha-shared/setup. Only a run on the default branch saves the prek
+  hook cache.
 
 inputs:
   extra-args:
@@ -30,6 +31,30 @@ runs:
         [ -n "$version" ] || { echo "::error file=Taskfile.yml::PREK_VERSION not found under vars:"; exit 1; }
         echo "version=$version" >>"$GITHUB_OUTPUT"
 
+    # prek-action's own cache saves from every run, pull requests included, so
+    # it is off and these steps cache prek's default cache directory instead.
+    # Like setup's caches, only a run on the default branch (a push or a
+    # scheduled run there) saves; every other run uses the restore-only
+    # variant. A changed config misses the key, and restore-keys fall back to
+    # the newest cache for the same prek version, so only the hooks whose rev
+    # changed are rebuilt. `prek cache gc` (last step) drops the superseded
+    # environments before the default branch saves.
+    - name: Restore the prek cache (saved at the end of the job)
+      if: ${{ (github.event_name == 'schedule' || github.ref == format('refs/heads/{0}', github.event.repository.default_branch)) }}
+      uses: actions/cache@v6.1.0 # zizmor: ignore[unpinned-uses] locked via ci.yml's lockfile
+      with:
+        path: ~/.cache/prek
+        key: gha-shared-prek-${{ runner.os }}-${{ runner.arch }}-${{ steps.prek.outputs.version }}-${{ hashFiles('**/prek.toml', '**/.pre-commit-config.yaml', '**/.pre-commit-config.yml') }}
+        restore-keys: gha-shared-prek-${{ runner.os }}-${{ runner.arch }}-${{ steps.prek.outputs.version }}-
+
+    - name: Restore the prek cache (not saved)
+      if: ${{ !(github.event_name == 'schedule' || github.ref == format('refs/heads/{0}', github.event.repository.default_branch)) }}
+      uses: actions/cache/restore@v6.1.0 # zizmor: ignore[unpinned-uses] locked via ci.yml's lockfile
+      with:
+        path: ~/.cache/prek
+        key: gha-shared-prek-${{ runner.os }}-${{ runner.arch }}-${{ steps.prek.outputs.version }}-${{ hashFiles('**/prek.toml', '**/.pre-commit-config.yaml', '**/.pre-commit-config.yml') }}
+        restore-keys: gha-shared-prek-${{ runner.os }}-${{ runner.arch }}-${{ steps.prek.outputs.version }}-
+
     - name: Run prek hooks
       uses: j178/prek-action@v3.1.0 # zizmor: ignore[unpinned-uses] locked via ci.yml's lockfile
       env:
@@ -37,6 +62,7 @@ runs:
       with:
         prek-version: ${{ steps.prek.outputs.version }}
         extra-args: ${{ inputs.extra-args }}
+        cache: "false"
 
     # Runs even when a hook failed, so one run reports both. The hook (and its
     # gh-actions-lock version) comes from the repo's .pre-commit-config.yaml;
@@ -48,3 +74,10 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.token }}
       run: prek run --hook-stage manual gh-actions-lock-verify --all-files
+
+    # Before the end-of-job save: drop hook environments the current config no
+    # longer uses, which the restore-keys fallback brought along.
+    - name: Prune unused prek environments
+      if: ${{ !cancelled() && (github.event_name == 'schedule' || github.ref == format('refs/heads/{0}', github.event.repository.default_branch)) }}
+      shell: bash
+      run: prek cache gc

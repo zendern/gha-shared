@@ -10,6 +10,7 @@ repositories and maybe others if you like the setup.
 
 - [GitHub Actions](#github-actions)
   - [`setup` and `checks`](#setup-and-checks): the start of every CI job
+  - [Caches](#caches): saved on main only, restored everywhere
   - [`tree-check`](#tree-check): skip re-testing a merge that main already holds
 - [Renovate presets](#renovate-presets): `github>zendern/gha-shared`
 - [Versioning](#versioning)
@@ -51,12 +52,12 @@ jobs:
 
 `setup` checks out the repository (`persist-credentials: false`; inputs `ref`
 and `fetch-depth`) and installs Task at `TASK_VERSION`. With `go-version-file`
-it also sets up Go and restores the `./bin` cache that Task's `go install`
-tasks build into, keyed on the Go version, `go-version-file` and
-`Taskfile.yml`. `go-cache-dependency-path` and `tools-cache-key` cover a module
-outside the repository root and jobs that build different tools.
+it also sets up Go and restores the Go build and module caches and the `./bin`
+cache that Task's `go install` tasks build into (see [Caches](#caches)).
+`go-cache-dependency-path` (one glob per line) and `tools-cache-key` cover
+modules outside the repository root and jobs that build different tools.
 
-`checks` runs every prek hook at `PREK_VERSION`, then
+`checks` restores the prek hook cache, runs every prek hook at `PREK_VERSION`, then
 `prek run --hook-stage manual gh-actions-lock-verify --all-files`, which checks
 `.github/workflows/actions.lock` against GitHub. The verify step runs even when
 a hook fails, so one run reports both. A repo using `checks` therefore needs:
@@ -86,48 +87,92 @@ bump. If a bump ever drops it, zizmor fails the PR, so it can't go unnoticed.
 The gate job (`workflow-summary`) stays in each repo:
 it lists the repo's own jobs in `needs:`, which an action can't do.
 
+### Caches
+
+`setup` and `checks` save their caches only from a run on the default branch
+(a push, or a scheduled run), and every other run only restores them. A cache
+a pull request saves is visible to that pull request alone, while every pull
+request can restore the default branch's. GitHub caps a repository at 10 GB
+and evicts the oldest caches first, so throwaway PR caches would push out the
+ones that matter. The cache paths are the defaults on GitHub's Linux runners.
+
+| Cache | Key | Fallback on a miss |
+| --- | --- | --- |
+| Go build and module (`setup`) | `gha-shared-go-<os>-<arch>-go<version>-<job>-<go.sum hash>` | newest for the same job, then for the same Go version |
+| `./bin` tools (`setup`) | `gha-shared-tools-<tools-cache-key or job>-<os>-<arch>-go<version>-<go-version-file + Taskfile.yml hash>` | none |
+| prek hooks (`checks`) | `gha-shared-prek-<os>-<arch>-<prek version>-<config hash>` | newest for the same prek version; `prek cache gc` trims it before a save |
+
+The Go fallback is what makes a dependency bump cheap: Go looks up each
+compiled package by its content, so a cache built against older dependencies
+recompiles only the packages that changed. A new Go version starts cold, which
+also stops the module cache from piling up old versions.
+
+So CI has to run on the default branch for pull requests to have anything to
+restore. A repo whose CI runs on `push` to main gets that for free. A repo
+that runs CI on pull requests only should run [`tree-check`](#tree-check) on
+push to main with `before-sha`, which re-runs CI exactly when main's caches
+need refreshing.
+
 ### `tree-check`
 
-Decides whether a merged PR needs re-testing on the base branch. CI runs on
-pull requests only, and a workflow on `pull_request: closed` uses this to skip
-the re-run when main already holds exactly the tested content:
+Decides whether a commit that landed on main needs CI run on it. CI runs on
+pull requests; a workflow on push to main uses this to skip the re-run when
+main already holds exactly the tested content and its caches are current:
 
 ```yaml
 on:
-  pull_request:
-    types: [closed]
+  push:
     branches: [main]
 
 jobs:
   tree-check:
-    if: ${{ github.event.pull_request.merged }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm
     permissions:
       contents: read
       checks: read
+      actions: read # list main's caches
     outputs:
       tested: ${{ steps.tree.outputs.tested }}
+      run-checks: ${{ steps.tree.outputs.run-checks }}
     steps:
       - id: tree
-        uses: zendern/gha-shared/tree-check@<sha> # v1.0.0
+        uses: zendern/gha-shared/tree-check@<tag>
         with:
-          merge-sha: ${{ github.event.pull_request.merge_commit_sha }}
-          head-sha: ${{ github.event.pull_request.head.sha }}
+          merge-sha: ${{ github.sha }}
+          before-sha: ${{ github.event.before }}
 
   test:
     needs: tree-check
-    if: ${{ needs.tree-check.outputs.tested == 'false' }}
+    if: ${{ needs.tree-check.outputs.run-checks == 'true' }}
     uses: ./.github/workflows/ci.yml
     with:
-      ref: ${{ github.event.pull_request.merge_commit_sha }}
+      ref: ${{ github.sha }}
 ```
 
-`tested` is `true` only when the merge commit's tree equals the PR head's tree
-**and** the most recent gate check (`check-name`, default `workflow-summary`)
-on that head succeeded. An earlier success doesn't count once a later re-run
-failed, and a check still in progress doesn't count yet. Point `check-name` at an all-green gate job, not at a whole-run
+`tested` is `true` only when the commit's tree equals the head tree of the
+merged PR it came from **and** the most recent gate check (`check-name`,
+default `workflow-summary`) on that head succeeded. An earlier success doesn't
+count once a later re-run failed, and a check still in progress doesn't count
+yet. Point `check-name` at an all-green gate job, not at a whole-run
 conclusion: a run whose jobs were all skipped (draft PRs, title edits) still
-concludes `success`.
+concludes `success`. A commit no merged PR produced (a direct push) is
+untested.
+
+`run-checks` is `true` when the commit is untested, or, with `before-sha`, when
+the push changed a file the shared [caches](#caches) are keyed on
+(go.sum, go.mod, go.work, Taskfile.yml and the prek configs) or
+main has no `gha-shared-` caches left, for example after GitHub evicted them.
+Running CI on main then re-saves them. A merge that changes none of those
+files bills only `tree-check`.
+
+Run on push, not on `pull_request: closed`: a run started by a pull_request
+event saves caches under the PR's ref, where no other PR can restore them. The
+`pull_request: closed` form still works (pass `head-sha` and leave out
+`before-sha`; `run-checks` is then the inverse of `tested`), but it never
+refreshes main's caches.
+
+A gate that must hold for a release should require `checks` to succeed, or to
+be skipped with `tested == 'true'`, so a failed cache-refresh run blocks it.
 
 The whole merged workflow can't be shared as a reusable workflow, because the
 re-test has to call each repository's own CI workflow and `uses:` must be a
@@ -168,9 +213,9 @@ workflow lockfile pins it to a commit. Renovate's github-actions manager bumps
 the tag and relocks.
 
 Merging to `main` releases automatically, once the merge is known checked: the
-`merged` workflow runs [`tree-check`](#tree-check) and re-runs `ci.yml`'s
-checks on the merge commit only when `main` moved under the PR. Its `release`
-job then runs
+`merged` workflow runs on the push to `main`, calls [`tree-check`](#tree-check),
+and re-runs `ci.yml`'s checks on the commit when `main` moved under the PR or
+its caches need refreshing. Its `release` job then runs
 [svu](https://github.com/caarlos0/svu) over the
 [Conventional Commits](https://www.conventionalcommits.org/) since the last
 tag: a `fix` is a patch, a `feat` a minor, a breaking change (`!` or

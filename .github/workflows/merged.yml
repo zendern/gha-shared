@@ -1,43 +1,47 @@
 name: merged
 
-# Runs when a PR merges into main. If the merge commit's tree is identical to
-# the PR head's and ci.yml's workflow-summary gate passed on that head, main
-# holds exactly what was checked and nothing re-runs; otherwise (main moved
-# under the PR) ci.yml re-runs its checks on the merge commit. A release follows
-# only once the merge is known checked, either way.
+# Runs on every push to main, so the CI it starts saves caches under main,
+# where every pull request can restore them (a pull_request run can only save
+# caches for its own PR). If the pushed commit's tree is identical to its PR
+# head's and ci.yml's workflow-summary gate passed on that head, main holds
+# exactly what was checked. ci.yml then re-runs only when the push changed a
+# file the shared caches are keyed on, or main has no shared caches left, so a
+# merge that needs no new cache bills only tree-check. Otherwise (main moved
+# under the PR, or a direct push) ci.yml re-runs its checks on the commit. A
+# release follows only once the commit is known checked, either way.
 on:
-  pull_request:
-    types: [closed]
+  push:
     branches: [main]
 
 permissions: {}
 
 jobs:
   tree-check:
-    if: ${{ github.event.pull_request.merged }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 5
     permissions:
       contents: read
       checks: read
+      actions: read # list main's caches
     outputs:
       tested: ${{ steps.tree.outputs.tested }}
+      run-checks: ${{ steps.tree.outputs.run-checks }}
     steps:
       # This repo's own action, at this workflow's commit.
       - id: tree
         uses: $/tree-check
         with:
-          merge-sha: ${{ github.event.pull_request.merge_commit_sha }}
-          head-sha: ${{ github.event.pull_request.head.sha }}
+          merge-sha: ${{ github.sha }}
+          before-sha: ${{ github.event.before }}
 
   checks:
     needs: [tree-check]
-    if: ${{ needs.tree-check.outputs.tested == 'false' }}
+    if: ${{ needs.tree-check.outputs.run-checks == 'true' }}
     permissions:
       contents: read
     uses: $/.github/workflows/ci.yml
     with:
-      ref: ${{ github.event.pull_request.merge_commit_sha }}
+      ref: ${{ github.sha }}
 
   # Releases when the Conventional Commits since the last tag call for it: a fix
   # is a patch, a feat a minor, a breaking change (`!` or BREAKING CHANGE) a
@@ -46,12 +50,14 @@ jobs:
   # Releases are immutable, so a published tag can't be moved.
   release:
     needs: [tree-check, checks]
-    # Only a merge known to be checked: tree-check passed and either found the
-    # PR's run covers main, or the re-run checks passed.
+    # Only a commit known to be checked: tree-check passed and either the
+    # checks on main passed, or they were skipped because the PR's run covers
+    # main. A cache-refresh run that fails still blocks the release.
     if: >-
       ${{ !cancelled()
       && needs.tree-check.result == 'success'
-      && (needs.tree-check.outputs.tested == 'true' || needs.checks.result == 'success') }}
+      && (needs.checks.result == 'success'
+        || (needs.checks.result == 'skipped' && needs.tree-check.outputs.tested == 'true')) }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 5
     permissions:
@@ -63,7 +69,7 @@ jobs:
     steps:
       - uses: $/setup
         with:
-          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          ref: ${{ github.sha }}
           # svu reads every commit since the last tag.
           fetch-depth: 0
       # svu runs through `go run`. This repo has no go.mod to pick a version
@@ -76,7 +82,7 @@ jobs:
       - name: Release if the commits since the last tag call for one
         env:
           GH_TOKEN: ${{ github.token }}
-          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          MERGE_SHA: ${{ github.sha }}
         run: |
           next="$(task --silent next-version)"
           if [ -z "$next" ]; then
