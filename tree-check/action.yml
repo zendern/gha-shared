@@ -34,25 +34,6 @@ inputs:
       the cache checks, so run-checks equals the inverse of tested.
     required: false
     default: ""
-  cache-files:
-    description: >-
-      Globs, one per line, of files the shared caches are keyed on. A push that
-      changes one sets run-checks. `*` also matches `/`.
-    required: false
-    default: |
-      *go.sum
-      *go.mod
-      *go.work
-      Taskfile.yml
-      *prek.toml
-      *.pre-commit-config.yaml
-      *.pre-commit-config.yml
-  cache-key-prefix:
-    description: >-
-      Prefix of the caches setup and checks save. When the branch holds none
-      (all evicted, or never seeded), run-checks is true.
-    required: false
-    default: gha-shared-
   token:
     description: >-
       Token with contents:read and checks:read on the repository, plus
@@ -67,8 +48,9 @@ outputs:
   run-checks:
     description: >-
       'true' when CI should run on merge-sha: it is untested, or (with
-      before-sha) the push changed a cache-files file or the branch has no
-      shared caches.
+      before-sha) the push changed a file the shared caches are keyed on
+      (go.sum, go.mod, go.work, Taskfile.yml, prek configs) or the branch has
+      no gha-shared- caches.
     value: ${{ steps.compare.outputs.run-checks }}
 
 runs:
@@ -85,10 +67,18 @@ runs:
         HEAD_SHA: ${{ inputs.head-sha }}
         BEFORE_SHA: ${{ inputs.before-sha }}
         CHECK_NAME: ${{ inputs.check-name }}
-        CACHE_FILES: ${{ inputs.cache-files }}
-        CACHE_KEY_PREFIX: ${{ inputs.cache-key-prefix }}
       run: |
         set -euo pipefail
+        # Files the shared caches (setup, checks) are keyed on, as globs where
+        # `*` also matches `/`, and the prefix of every cache key they save.
+        CACHE_FILES='*go.sum
+        *go.mod
+        *go.work
+        Taskfile.yml
+        *prek.toml
+        *.pre-commit-config.yaml
+        *.pre-commit-config.yml'
+        CACHE_KEY_PREFIX=gha-shared-
         tree() {
           gh api "repos/$REPO/git/commits/$1" --jq '.tree.sha'
         }
@@ -130,7 +120,7 @@ runs:
               changed="$(gh api "repos/$REPO/compare/$BEFORE_SHA...$MERGE_SHA" --jq '.files[].filename')"
               while IFS= read -r file; do
                 [ -n "$file" ] || continue
-                while IFS= read -r pattern; do
+                while read -r pattern; do
                   [ -n "$pattern" ] || continue
                   # Unquoted on purpose: the pattern is a glob.
                   # shellcheck disable=SC2053

@@ -94,12 +94,11 @@ it lists the repo's own jobs in `needs:`, which an action can't do.
 a pull request saves is visible to that pull request alone, while every pull
 request can restore the default branch's. GitHub caps a repository at 10 GB
 and evicts the oldest caches first, so throwaway PR caches would push out the
-ones that matter. `save-cache: true` or `false` on either action overrides the
-rule.
+ones that matter. The cache paths are the defaults on GitHub's Linux runners.
 
 | Cache | Key | Fallback on a miss |
 | --- | --- | --- |
-| Go build and module (`setup`) | `gha-shared-go-<os>-<arch>-go<version>-<job>-<spec>-<go.sum hash>` | newest for the same job and spec, then for the same Go version |
+| Go build and module (`setup`) | `gha-shared-go-<os>-<arch>-go<version>-<job>-<go.sum hash>` | newest for the same job, then for the same Go version |
 | `./bin` tools (`setup`) | `gha-shared-tools-<tools-cache-key or job>-<os>-<arch>-go<version>-<go-version-file + Taskfile.yml hash>` | none |
 | prek hooks (`checks`) | `gha-shared-prek-<os>-<arch>-<prek version>-<config hash>` | newest for the same prek version; `prek cache gc` trims it before a save |
 
@@ -161,7 +160,7 @@ untested.
 
 `run-checks` is `true` when the commit is untested, or, with `before-sha`, when
 the push changed a file the shared [caches](#caches) are keyed on
-(`cache-files`: go.sum, go.mod, go.work, Taskfile.yml and the prek configs) or
+(go.sum, go.mod, go.work, Taskfile.yml and the prek configs) or
 main has no `gha-shared-` caches left, for example after GitHub evicted them.
 Running CI on main then re-saves them. A merge that changes none of those
 files bills only `tree-check`.
