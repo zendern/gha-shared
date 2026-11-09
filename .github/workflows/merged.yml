@@ -17,7 +17,7 @@ permissions: {}
 
 jobs:
   tree-check:
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     timeout-minutes: 5
     permissions:
       contents: read
@@ -58,7 +58,7 @@ jobs:
       && needs.tree-check.result == 'success'
       && (needs.checks.result == 'success'
         || (needs.checks.result == 'skipped' && needs.tree-check.outputs.tested == 'true')) }}
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     timeout-minutes: 5
     permissions:
       contents: write # create the release and its tag
