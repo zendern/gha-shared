@@ -26,23 +26,14 @@ inputs:
     default: ""
   go-cache-dependency-path:
     description: >-
-      go.sum path(s) keying the Go cache, one glob per line (`**` matches
-      across directories). Empty uses every go.sum in the repository.
+      go.sum path(s) keying the Go cache, one glob per line. Empty uses every
+      go.sum in the repository.
     required: false
     default: ""
   tools-cache-key:
     description: >-
       Prefix of the ./bin cache key. Defaults to the job id, so jobs that build
       different tools keep separate caches.
-    required: false
-    default: ""
-  save-cache:
-    description: >-
-      'true' saves the Go and tools caches at the end of the job, 'false' only
-      restores them. Empty saves only on the default branch (a push or a
-      scheduled run there): caches a pull request saves are visible to that
-      pull request alone, and they evict the default branch's caches, which
-      every pull request restores from.
     required: false
     default: ""
 
@@ -85,107 +76,60 @@ runs:
         go-version-file: ${{ inputs.go-version-file }}
         cache: false
 
-    # The key ends in a hash of the go.sum files, so a changed dependency misses
-    # it. restore-keys then fall back to the newest cache for the same Go
-    # version, first from this job and dependency spec, then from any job. Go
-    # looks up each compiled package by its content, so a cache from older
-    # dependencies is safe to use and recompiles only what changed. A new Go
-    # version starts cold, which also keeps the module cache from accumulating
-    # old versions indefinitely.
-    - name: Compute the Go cache key
-      id: go-cache-key
-      if: ${{ inputs.go-version-file != '' }}
-      shell: bash
-      env:
-        DEPENDENCY_PATH: ${{ inputs.go-cache-dependency-path || '**/go.sum' }}
-        SAVE_CACHE: ${{ inputs.save-cache }}
-        JOB_KEY: ${{ github.job }}
-        GO_VERSION: ${{ steps.setup-go.outputs.go-version }}
-        DEFAULT_REF: refs/heads/${{ github.event.repository.default_branch }}
-      run: |
-        set -euo pipefail
-        shopt -s globstar nullglob
-        files=()
-        while IFS= read -r pattern; do
-          pattern="${pattern#"${pattern%%[![:space:]]*}"}"
-          pattern="${pattern%"${pattern##*[![:space:]]}"}"
-          [ -n "$pattern" ] || continue
-          # Unquoted on purpose: the pattern is a glob to expand. A pattern
-          # with no glob characters stays as written even when the file is
-          # missing, so only existing files count.
-          for file in $pattern; do
-            if [ -f "$file" ]; then files+=("$file"); fi
-          done
-        done <<<"$DEPENDENCY_PATH"
-        if [ "${#files[@]}" -eq 0 ]; then
-          deps=none
-        else
-          deps="$(printf '%s\0' "${files[@]}" | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-16)"
-        fi
-        # Matrix jobs share a job id but key on different go.sum files; the
-        # spec hash keeps their fallbacks apart.
-        spec="$(printf '%s' "$DEPENDENCY_PATH" | sha256sum | cut -c1-8)"
-        prefix="gha-shared-go-${RUNNER_OS}-${RUNNER_ARCH}-go${GO_VERSION}-"
-        {
-          echo "key=${prefix}${JOB_KEY}-${spec}-${deps}"
-          echo "restore-keys<<EOF"
-          echo "${prefix}${JOB_KEY}-${spec}-"
-          echo "$prefix"
-          echo "EOF"
-          echo "gocache=$(go env GOCACHE)"
-          echo "gomodcache=$(go env GOMODCACHE)"
-        } >>"$GITHUB_OUTPUT"
-        case "$SAVE_CACHE" in
-          true | false) save="$SAVE_CACHE" ;;
-          "")
-            save=false
-            if [ "$GITHUB_EVENT_NAME" = schedule ] || [ "$GITHUB_REF" = "$DEFAULT_REF" ]; then
-              save=true
-            fi
-            ;;
-          *) echo "::error::save-cache must be 'true', 'false' or empty, got '$SAVE_CACHE'"; exit 1 ;;
-        esac
-        echo "save=$save" >>"$GITHUB_OUTPUT"
-        echo "Go cache key ${prefix}${JOB_KEY}-${spec}-${deps}; save=$save"
-
-    # actions/cache saves in its post step, at the end of the job, once the
-    # job's own builds have filled the cache. The restore-only variant has no
-    # post step, so a run that must not save uses it instead.
+    # Caches are saved only from the default branch (a push or a scheduled run
+    # there). A cache a pull request saves is visible to that pull request
+    # alone, and it evicts the default branch's caches, which every pull
+    # request restores from. actions/cache saves in its post step, at the end
+    # of the job, once the job's builds have filled the cache; every other run
+    # uses the restore-only variant, which has no post step.
+    #
+    # The Go key ends in a hash of the go.sum files, so a changed dependency
+    # misses it. restore-keys then fall back to the newest cache for the same
+    # Go version, first from this job, then from any job. Go looks up each
+    # compiled package by its content, so a cache from older dependencies is
+    # safe to use and recompiles only what changed. A new Go version starts
+    # cold, which also keeps the module cache from piling up old versions.
+    # Paths are the Go defaults on GitHub's Linux runners.
     - name: Restore the Go cache (saved at the end of the job)
       id: go-cache-save
-      if: ${{ inputs.go-version-file != '' && steps.go-cache-key.outputs.save == 'true' }}
+      if: ${{ inputs.go-version-file != '' && (github.event_name == 'schedule' || github.ref == format('refs/heads/{0}', github.event.repository.default_branch)) }}
       uses: actions/cache@v6.1.0 # zizmor: ignore[unpinned-uses] locked via ci.yml's lockfile
       with:
         path: |
-          ${{ steps.go-cache-key.outputs.gocache }}
-          ${{ steps.go-cache-key.outputs.gomodcache }}
-        key: ${{ steps.go-cache-key.outputs.key }}
-        restore-keys: ${{ steps.go-cache-key.outputs.restore-keys }}
+          ~/.cache/go-build
+          ~/go/pkg/mod
+        # hashFiles hands a multi-line input to @actions/glob as one pattern per line.
+        key: gha-shared-go-${{ runner.os }}-${{ runner.arch }}-go${{ steps.setup-go.outputs.go-version }}-${{ github.job }}-${{ hashFiles(inputs.go-cache-dependency-path || '**/go.sum') }}
+        restore-keys: |
+          gha-shared-go-${{ runner.os }}-${{ runner.arch }}-go${{ steps.setup-go.outputs.go-version }}-${{ github.job }}-
+          gha-shared-go-${{ runner.os }}-${{ runner.arch }}-go${{ steps.setup-go.outputs.go-version }}-
 
     - name: Restore the Go cache (not saved)
       id: go-cache-restore
-      if: ${{ inputs.go-version-file != '' && steps.go-cache-key.outputs.save != 'true' }}
+      if: ${{ inputs.go-version-file != '' && !(github.event_name == 'schedule' || github.ref == format('refs/heads/{0}', github.event.repository.default_branch)) }}
       uses: actions/cache/restore@v6.1.0 # zizmor: ignore[unpinned-uses] locked via ci.yml's lockfile
       with:
         path: |
-          ${{ steps.go-cache-key.outputs.gocache }}
-          ${{ steps.go-cache-key.outputs.gomodcache }}
-        key: ${{ steps.go-cache-key.outputs.key }}
-        restore-keys: ${{ steps.go-cache-key.outputs.restore-keys }}
+          ~/.cache/go-build
+          ~/go/pkg/mod
+        # hashFiles hands a multi-line input to @actions/glob as one pattern per line.
+        key: gha-shared-go-${{ runner.os }}-${{ runner.arch }}-go${{ steps.setup-go.outputs.go-version }}-${{ github.job }}-${{ hashFiles(inputs.go-cache-dependency-path || '**/go.sum') }}
+        restore-keys: |
+          gha-shared-go-${{ runner.os }}-${{ runner.arch }}-go${{ steps.setup-go.outputs.go-version }}-${{ github.job }}-
+          gha-shared-go-${{ runner.os }}-${{ runner.arch }}-go${{ steps.setup-go.outputs.go-version }}-
 
     # Tools built from source into ./bin (Taskfile.yml go-install tasks). A
     # warm cache lets Task's status checks skip the build. A bumped pin in
-    # Taskfile.yml, the go directive, or the Go version changes the key. Saved
-    # under the same rule as the Go cache.
+    # Taskfile.yml, the go directive, or the Go version changes the key.
     - name: Restore the tools cache (saved at the end of the job)
-      if: ${{ inputs.go-version-file != '' && steps.go-cache-key.outputs.save == 'true' }}
+      if: ${{ inputs.go-version-file != '' && (github.event_name == 'schedule' || github.ref == format('refs/heads/{0}', github.event.repository.default_branch)) }}
       uses: actions/cache@v6.1.0 # zizmor: ignore[unpinned-uses] locked via ci.yml's lockfile
       with:
         path: bin
         key: gha-shared-tools-${{ inputs.tools-cache-key || github.job }}-${{ runner.os }}-${{ runner.arch }}-go${{ steps.setup-go.outputs.go-version }}-${{ hashFiles(inputs.go-version-file, 'Taskfile.yml') }}
 
     - name: Restore the tools cache (not saved)
-      if: ${{ inputs.go-version-file != '' && steps.go-cache-key.outputs.save != 'true' }}
+      if: ${{ inputs.go-version-file != '' && !(github.event_name == 'schedule' || github.ref == format('refs/heads/{0}', github.event.repository.default_branch)) }}
       uses: actions/cache/restore@v6.1.0 # zizmor: ignore[unpinned-uses] locked via ci.yml's lockfile
       with:
         path: bin
