@@ -1,8 +1,9 @@
 name: ci
 
-# Runs on pull requests, and from merged.yml on a merge commit that main holds
-# untested. It doesn't run on push to main: merged.yml decides whether a merge
-# needs testing (every job bills a rounded-up minute).
+# Runs on pull requests, and from merged.yml on a push to main that holds
+# untested content or needs main's caches refreshed. It has no push trigger of
+# its own: merged.yml decides whether a push needs a run (every job bills a
+# rounded-up minute). Runs on main save the caches pull requests restore.
 on:
   pull_request:
   workflow_call:
