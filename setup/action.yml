@@ -1,8 +1,9 @@
 name: setup
 description: >-
   Check out the repository and install Task at the TASK_VERSION pinned in the
-  repo's Taskfile.yml. With go-version-file, also set up Go and restore the
-  ./bin tools cache that Task's go-install tasks build into.
+  repo's Taskfile.yml. With go-version-file, also set up Go and restore the Go
+  build and module caches and the ./bin tools cache that Task's go-install
+  tasks build into. Only a run on the default branch saves those caches.
 
 # Steps use version tags, not SHAs: gh actions-lock rewrites them to tags
 # (this repo's CI reaches them through `$/`), and each caller's lockfile pins
@@ -20,13 +21,13 @@ inputs:
   go-version-file:
     description: >-
       go.mod (or go.work) whose go directive picks the Go version. Empty skips
-      Go setup and the tools cache.
+      Go setup and the Go and tools caches.
     required: false
     default: ""
   go-cache-dependency-path:
     description: >-
-      go.sum path(s) keying setup-go's module cache, for a module not at the
-      repository root. Empty uses setup-go's default.
+      go.sum path(s) keying the Go cache, one glob per line (`**` matches
+      across directories). Empty uses every go.sum in the repository.
     required: false
     default: ""
   tools-cache-key:
@@ -35,11 +36,23 @@ inputs:
       different tools keep separate caches.
     required: false
     default: ""
+  save-cache:
+    description: >-
+      'true' saves the Go and tools caches at the end of the job, 'false' only
+      restores them. Empty saves only on the default branch (a push or a
+      scheduled run there): caches a pull request saves are visible to that
+      pull request alone, and they evict the default branch's caches, which
+      every pull request restores from.
+    required: false
+    default: ""
 
 outputs:
   go-version:
     description: The Go version installed (empty without go-version-file).
     value: ${{ steps.setup-go.outputs.go-version }}
+  go-cache-hit:
+    description: "'true' when the Go cache restored on its exact key."
+    value: ${{ steps.go-cache-save.outputs.cache-hit || steps.go-cache-restore.outputs.cache-hit }}
 
 runs:
   using: composite
@@ -62,18 +75,118 @@ runs:
       with:
         version: ${{ steps.task.outputs.version }}
 
+    # setup-go's own cache matches only an exact key (Go version plus a hash of
+    # go.sum) and saves from every run, pull requests included. The steps below
+    # replace it.
     - uses: actions/setup-go@v7.0.0 # zizmor: ignore[unpinned-uses] locked via ci.yml's lockfile
       id: setup-go
       if: ${{ inputs.go-version-file != '' }}
       with:
         go-version-file: ${{ inputs.go-version-file }}
-        cache-dependency-path: ${{ inputs.go-cache-dependency-path }}
+        cache: false
+
+    # The key ends in a hash of the go.sum files, so a changed dependency misses
+    # it. restore-keys then fall back to the newest cache for the same Go
+    # version, first from this job and dependency spec, then from any job. Go
+    # looks up each compiled package by its content, so a cache from older
+    # dependencies is safe to use and recompiles only what changed. A new Go
+    # version starts cold, which also keeps the module cache from accumulating
+    # old versions indefinitely.
+    - name: Compute the Go cache key
+      id: go-cache-key
+      if: ${{ inputs.go-version-file != '' }}
+      shell: bash
+      env:
+        DEPENDENCY_PATH: ${{ inputs.go-cache-dependency-path || '**/go.sum' }}
+        SAVE_CACHE: ${{ inputs.save-cache }}
+        JOB_KEY: ${{ github.job }}
+        GO_VERSION: ${{ steps.setup-go.outputs.go-version }}
+        DEFAULT_REF: refs/heads/${{ github.event.repository.default_branch }}
+      run: |
+        set -euo pipefail
+        shopt -s globstar nullglob
+        files=()
+        while IFS= read -r pattern; do
+          pattern="${pattern#"${pattern%%[![:space:]]*}"}"
+          pattern="${pattern%"${pattern##*[![:space:]]}"}"
+          [ -n "$pattern" ] || continue
+          # Unquoted on purpose: the pattern is a glob to expand. A pattern
+          # with no glob characters stays as written even when the file is
+          # missing, so only existing files count.
+          for file in $pattern; do
+            if [ -f "$file" ]; then files+=("$file"); fi
+          done
+        done <<<"$DEPENDENCY_PATH"
+        if [ "${#files[@]}" -eq 0 ]; then
+          deps=none
+        else
+          deps="$(printf '%s\0' "${files[@]}" | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-16)"
+        fi
+        # Matrix jobs share a job id but key on different go.sum files; the
+        # spec hash keeps their fallbacks apart.
+        spec="$(printf '%s' "$DEPENDENCY_PATH" | sha256sum | cut -c1-8)"
+        prefix="gha-shared-go-${RUNNER_OS}-${RUNNER_ARCH}-go${GO_VERSION}-"
+        {
+          echo "key=${prefix}${JOB_KEY}-${spec}-${deps}"
+          echo "restore-keys<<EOF"
+          echo "${prefix}${JOB_KEY}-${spec}-"
+          echo "$prefix"
+          echo "EOF"
+          echo "gocache=$(go env GOCACHE)"
+          echo "gomodcache=$(go env GOMODCACHE)"
+        } >>"$GITHUB_OUTPUT"
+        case "$SAVE_CACHE" in
+          true | false) save="$SAVE_CACHE" ;;
+          "")
+            save=false
+            if [ "$GITHUB_EVENT_NAME" = schedule ] || [ "$GITHUB_REF" = "$DEFAULT_REF" ]; then
+              save=true
+            fi
+            ;;
+          *) echo "::error::save-cache must be 'true', 'false' or empty, got '$SAVE_CACHE'"; exit 1 ;;
+        esac
+        echo "save=$save" >>"$GITHUB_OUTPUT"
+        echo "Go cache key ${prefix}${JOB_KEY}-${spec}-${deps}; save=$save"
+
+    # actions/cache saves in its post step, at the end of the job, once the
+    # job's own builds have filled the cache. The restore-only variant has no
+    # post step, so a run that must not save uses it instead.
+    - name: Restore the Go cache (saved at the end of the job)
+      id: go-cache-save
+      if: ${{ inputs.go-version-file != '' && steps.go-cache-key.outputs.save == 'true' }}
+      uses: actions/cache@v6.1.0 # zizmor: ignore[unpinned-uses] locked via ci.yml's lockfile
+      with:
+        path: |
+          ${{ steps.go-cache-key.outputs.gocache }}
+          ${{ steps.go-cache-key.outputs.gomodcache }}
+        key: ${{ steps.go-cache-key.outputs.key }}
+        restore-keys: ${{ steps.go-cache-key.outputs.restore-keys }}
+
+    - name: Restore the Go cache (not saved)
+      id: go-cache-restore
+      if: ${{ inputs.go-version-file != '' && steps.go-cache-key.outputs.save != 'true' }}
+      uses: actions/cache/restore@v6.1.0 # zizmor: ignore[unpinned-uses] locked via ci.yml's lockfile
+      with:
+        path: |
+          ${{ steps.go-cache-key.outputs.gocache }}
+          ${{ steps.go-cache-key.outputs.gomodcache }}
+        key: ${{ steps.go-cache-key.outputs.key }}
+        restore-keys: ${{ steps.go-cache-key.outputs.restore-keys }}
 
     # Tools built from source into ./bin (Taskfile.yml go-install tasks). A
     # warm cache lets Task's status checks skip the build. A bumped pin in
-    # Taskfile.yml, the go directive, or the Go version changes the key.
-    - uses: actions/cache@v6.1.0 # zizmor: ignore[unpinned-uses] locked via ci.yml's lockfile
-      if: ${{ inputs.go-version-file != '' }}
+    # Taskfile.yml, the go directive, or the Go version changes the key. Saved
+    # under the same rule as the Go cache.
+    - name: Restore the tools cache (saved at the end of the job)
+      if: ${{ inputs.go-version-file != '' && steps.go-cache-key.outputs.save == 'true' }}
+      uses: actions/cache@v6.1.0 # zizmor: ignore[unpinned-uses] locked via ci.yml's lockfile
       with:
         path: bin
-        key: tools-${{ inputs.tools-cache-key || github.job }}-${{ runner.os }}-${{ runner.arch }}-go${{ steps.setup-go.outputs.go-version }}-${{ hashFiles(inputs.go-version-file, 'Taskfile.yml') }}
+        key: gha-shared-tools-${{ inputs.tools-cache-key || github.job }}-${{ runner.os }}-${{ runner.arch }}-go${{ steps.setup-go.outputs.go-version }}-${{ hashFiles(inputs.go-version-file, 'Taskfile.yml') }}
+
+    - name: Restore the tools cache (not saved)
+      if: ${{ inputs.go-version-file != '' && steps.go-cache-key.outputs.save != 'true' }}
+      uses: actions/cache/restore@v6.1.0 # zizmor: ignore[unpinned-uses] locked via ci.yml's lockfile
+      with:
+        path: bin
+        key: gha-shared-tools-${{ inputs.tools-cache-key || github.job }}-${{ runner.os }}-${{ runner.arch }}-go${{ steps.setup-go.outputs.go-version }}-${{ hashFiles(inputs.go-version-file, 'Taskfile.yml') }}
