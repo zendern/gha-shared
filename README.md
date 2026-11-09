@@ -54,8 +54,9 @@ jobs:
 and `fetch-depth`) and installs Task at `TASK_VERSION`. With `go-version-file`
 it also sets up Go and restores the Go build and module caches and the `./bin`
 cache that Task's `go install` tasks build into (see [Caches](#caches)).
-`go-cache-dependency-path` (one glob per line) and `tools-cache-key` cover
-modules outside the repository root and jobs that build different tools.
+`go-cache-dependency-path` (one glob per line) covers modules outside the
+repository root. Caches are keyed per job, so jobs that build different tools
+keep separate ones.
 
 `checks` restores the prek hook cache, runs every prek hook at `PREK_VERSION`, then
 `prek run --hook-stage manual gh-actions-lock-verify --all-files`, which checks
@@ -99,7 +100,7 @@ ones that matter. The cache paths are the defaults on GitHub's Linux runners.
 | Cache | Key | Fallback on a miss |
 | --- | --- | --- |
 | Go build and module (`setup`) | `gha-shared-go-<os>-<arch>-go<version>-<job>-<go.sum hash>` | newest for the same job, then for the same Go version |
-| `./bin` tools (`setup`) | `gha-shared-tools-<tools-cache-key or job>-<os>-<arch>-go<version>-<go-version-file + Taskfile.yml hash>` | none |
+| `./bin` tools (`setup`) | `gha-shared-tools-<job>-<os>-<arch>-go<version>-<go-version-file + Taskfile.yml hash>` | none |
 | prek hooks (`checks`) | `gha-shared-prek-<os>-<arch>-<prek version>-<config hash>` | newest for the same prek version; `prek cache gc` trims it before a save |
 
 The Go fallback is what makes a dependency bump cheap: Go looks up each
