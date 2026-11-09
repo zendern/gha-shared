@@ -30,12 +30,6 @@ inputs:
       go.sum in the repository.
     required: false
     default: ""
-  tools-cache-key:
-    description: >-
-      Prefix of the ./bin cache key. Defaults to the job id, so jobs that build
-      different tools keep separate caches.
-    required: false
-    default: ""
 
 outputs:
   go-version:
@@ -126,11 +120,11 @@ runs:
       uses: actions/cache@v6.1.0 # zizmor: ignore[unpinned-uses] locked via ci.yml's lockfile
       with:
         path: bin
-        key: gha-shared-tools-${{ inputs.tools-cache-key || github.job }}-${{ runner.os }}-${{ runner.arch }}-go${{ steps.setup-go.outputs.go-version }}-${{ hashFiles(inputs.go-version-file, 'Taskfile.yml') }}
+        key: gha-shared-tools-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-go${{ steps.setup-go.outputs.go-version }}-${{ hashFiles(inputs.go-version-file, 'Taskfile.yml') }}
 
     - name: Restore the tools cache (not saved)
       if: ${{ inputs.go-version-file != '' && !(github.event_name == 'schedule' || github.ref == format('refs/heads/{0}', github.event.repository.default_branch)) }}
       uses: actions/cache/restore@v6.1.0 # zizmor: ignore[unpinned-uses] locked via ci.yml's lockfile
       with:
         path: bin
-        key: gha-shared-tools-${{ inputs.tools-cache-key || github.job }}-${{ runner.os }}-${{ runner.arch }}-go${{ steps.setup-go.outputs.go-version }}-${{ hashFiles(inputs.go-version-file, 'Taskfile.yml') }}
+        key: gha-shared-tools-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-go${{ steps.setup-go.outputs.go-version }}-${{ hashFiles(inputs.go-version-file, 'Taskfile.yml') }}
