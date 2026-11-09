@@ -1,17 +1,26 @@
 name: tree-check
 description: >-
-  Decide whether a merged PR needs re-testing. Outputs tested=true when the
-  merge commit's tree is identical to the PR head's tree and the gate check
-  passed on that head: identical trees mean the base branch now holds exactly
-  the content that was tested.
+  Decide whether a commit that landed on the base branch needs CI run on it.
+  Outputs tested=true when the commit's tree is identical to the tree of its
+  merged PR's head and the gate check passed on that head: identical trees mean
+  the base branch now holds exactly the content that was tested. With
+  before-sha (a push to the base branch), run-checks also asks for a run when
+  the push changed a file the shared caches are keyed on, or when the branch
+  has no shared caches left, so the base branch's caches stay current.
 
 inputs:
   merge-sha:
-    description: The PR's merge commit (github.event.pull_request.merge_commit_sha).
+    description: >-
+      The commit on the base branch: github.sha on push, or
+      github.event.pull_request.merge_commit_sha on pull_request closed.
     required: true
   head-sha:
-    description: The PR's head commit (github.event.pull_request.head.sha).
-    required: true
+    description: >-
+      The merged PR's head commit (github.event.pull_request.head.sha). Empty
+      looks up the merged PR whose merge commit is merge-sha; a commit with no
+      such PR (a direct push) counts as untested.
+    required: false
+    default: ""
   check-name:
     description: >-
       Check run that proves the head was tested. Use a gate job (for example
@@ -19,8 +28,35 @@ inputs:
       all skipped (drafts, title edits) still concludes success.
     required: false
     default: workflow-summary
+  before-sha:
+    description: >-
+      The branch's previous commit (github.event.before on push). Empty skips
+      the cache checks, so run-checks equals the inverse of tested.
+    required: false
+    default: ""
+  cache-files:
+    description: >-
+      Globs, one per line, of files the shared caches are keyed on. A push that
+      changes one sets run-checks. `*` also matches `/`.
+    required: false
+    default: |
+      *go.sum
+      *go.mod
+      *go.work
+      Taskfile.yml
+      *prek.toml
+      *.pre-commit-config.yaml
+      *.pre-commit-config.yml
+  cache-key-prefix:
+    description: >-
+      Prefix of the caches setup and checks save. When the branch holds none
+      (all evicted, or never seeded), run-checks is true.
+    required: false
+    default: gha-shared-
   token:
-    description: Token with contents:read and checks:read on the repository.
+    description: >-
+      Token with contents:read and checks:read on the repository, plus
+      actions:read when before-sha is set (to list the branch's caches).
     required: false
     default: ${{ github.token }}
 
@@ -28,19 +64,29 @@ outputs:
   tested:
     description: "'true' when the merged content was already tested, else 'false'."
     value: ${{ steps.compare.outputs.tested }}
+  run-checks:
+    description: >-
+      'true' when CI should run on merge-sha: it is untested, or (with
+      before-sha) the push changed a cache-files file or the branch has no
+      shared caches.
+    value: ${{ steps.compare.outputs.run-checks }}
 
 runs:
   using: composite
   steps:
-    - name: Compare merged tree with the tested PR head
+    - name: Compare the merged tree with the tested PR head
       id: compare
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.token }}
         REPO: ${{ github.repository }}
+        REF: ${{ github.ref }}
         MERGE_SHA: ${{ inputs.merge-sha }}
         HEAD_SHA: ${{ inputs.head-sha }}
+        BEFORE_SHA: ${{ inputs.before-sha }}
         CHECK_NAME: ${{ inputs.check-name }}
+        CACHE_FILES: ${{ inputs.cache-files }}
+        CACHE_KEY_PREFIX: ${{ inputs.cache-key-prefix }}
       run: |
         set -euo pipefail
         tree() {
@@ -54,12 +100,58 @@ runs:
           gh api "repos/$REPO/commits/$HEAD_SHA/check-runs?check_name=$CHECK_NAME&filter=all" \
             --jq '[.check_runs[] | select(.app.slug == "github-actions")] | sort_by(.started_at) | last | .conclusion // "none"'
         }
-        merge_tree="$(tree "$MERGE_SHA")"
-        head_tree="$(tree "$HEAD_SHA")"
-        conclusion="$(latest)"
-        tested=false
-        if [ "$merge_tree" = "$head_tree" ] && [ "$conclusion" = "success" ]; then
-          tested=true
+
+        if [ -z "$HEAD_SHA" ]; then
+          HEAD_SHA="$(gh api "repos/$REPO/commits/$MERGE_SHA/pulls" \
+            --jq "[.[] | select(.merged_at != null and .merge_commit_sha == \"$MERGE_SHA\")] | first | .head.sha // \"\"")"
         fi
-        echo "merge tree $merge_tree, head tree $head_tree, latest $CHECK_NAME on head: $conclusion; tested=$tested"
-        echo "tested=$tested" >> "$GITHUB_OUTPUT"
+
+        tested=false
+        if [ -z "$HEAD_SHA" ]; then
+          echo "No merged PR has $MERGE_SHA as its merge commit; tested=false"
+        else
+          merge_tree="$(tree "$MERGE_SHA")"
+          head_tree="$(tree "$HEAD_SHA")"
+          conclusion="$(latest)"
+          if [ "$merge_tree" = "$head_tree" ] && [ "$conclusion" = "success" ]; then
+            tested=true
+          fi
+          echo "merge tree $merge_tree, head tree $head_tree, latest $CHECK_NAME on head $HEAD_SHA: $conclusion; tested=$tested"
+        fi
+
+        run_checks=true
+        if [ "$tested" = true ]; then
+          run_checks=false
+          if [ -n "$BEFORE_SHA" ]; then
+            if [ "$BEFORE_SHA" = 0000000000000000000000000000000000000000 ]; then
+              echo "New branch: no previous commit to compare against."
+              run_checks=true
+            else
+              changed="$(gh api "repos/$REPO/compare/$BEFORE_SHA...$MERGE_SHA" --jq '.files[].filename')"
+              while IFS= read -r file; do
+                [ -n "$file" ] || continue
+                while IFS= read -r pattern; do
+                  [ -n "$pattern" ] || continue
+                  # Unquoted on purpose: the pattern is a glob.
+                  # shellcheck disable=SC2053
+                  if [[ "$file" == $pattern ]]; then
+                    echo "Cache input changed: $file (matches $pattern)"
+                    run_checks=true
+                  fi
+                done <<<"$CACHE_FILES"
+              done <<<"$changed"
+            fi
+            if [ "$run_checks" = false ]; then
+              count="$(gh api "repos/$REPO/actions/caches?ref=$REF&key=$CACHE_KEY_PREFIX&per_page=1" --jq '.total_count')"
+              echo "$count cache(s) on $REF start with $CACHE_KEY_PREFIX"
+              if [ "$count" = 0 ]; then
+                run_checks=true
+              fi
+            fi
+          fi
+        fi
+        echo "run-checks=$run_checks"
+        {
+          echo "tested=$tested"
+          echo "run-checks=$run_checks"
+        } >>"$GITHUB_OUTPUT"
