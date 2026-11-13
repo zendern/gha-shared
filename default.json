@@ -6,6 +6,10 @@
     "schedule:weekly"
   ],
   "updateNotScheduled": false,
+  "draftPR": true,
+  "labels": [
+    "renovate"
+  ],
   "minimumReleaseAge": "7 days",
   "internalChecksFilter": "strict",
   "pre-commit": {
@@ -44,8 +48,11 @@
       ]
     },
     {
-      "description": "Every Renovate push re-runs CI on a GitHub Free minute budget, so major updates only get a PR once ticked on the Dependency Dashboard. A repo can opt files out with a later rule setting dependencyDashboardApproval to false.",
+      "description": "Every Renovate push re-runs CI on a GitHub Free minute budget, so major updates only get a PR once ticked on the Dependency Dashboard. A repo can opt files out with a later rule setting dependencyDashboardApproval to false. Majors also get a `major` label.",
       "matchUpdateTypes": [
+        "major"
+      ],
+      "addLabels": [
         "major"
       ],
       "dependencyDashboardApproval": true
