@@ -191,6 +191,13 @@ only its own custom managers, groups and host rules:
   `internalChecksFilter: strict`.
 - A weekly schedule, with no updates to existing PRs outside it
   (`updateNotScheduled: false`).
+- Every PR opened as a draft (`draftPR: true`). CI that skips draft PRs then
+  runs only once someone marks the PR ready for review, so a Renovate PR costs
+  no CI minutes until it is looked at. Renovate applies this when it opens a
+  PR; existing PRs keep their state.
+- A `renovate` label on every PR, plus `major` on major updates, for filtering
+  (`is:pr label:renovate`). A repo adds its own with `addLabels` in a
+  packageRule.
 - The `pre-commit` manager, so prek hook revs are bumped.
 - A custom manager for `<NAME>_VERSION:` pins under a `# renovate:` comment, in
   `Taskfile.yml` and in `action.yml` files. A repo that defines its own copy of
